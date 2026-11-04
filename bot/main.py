@@ -345,6 +345,13 @@ async def on_message(msg: dict):
     if text.startswith("/stats") and chat_id == ADMIN_CHAT_ID:
         await send(chat_id, stats_text(24))
         return
+    if text.startswith("/logs") and chat_id == ADMIN_CHAT_ID:
+        proc = await asyncio.create_subprocess_exec(
+            "journalctl", "-u", "direct-bot", "-n", "40", "--no-pager", "-o", "short",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        out, _ = await proc.communicate()
+        await send(chat_id, (out.decode(errors="replace")[-3800:] or "журнал пуст"))
+        return
     if not text:
         await send(chat_id, "Пока я понимаю только текст. Опишите, пожалуйста, словами — или я передам менеджеру.")
         return
