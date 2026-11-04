@@ -192,6 +192,29 @@ if ANSWERS:
     })
 
 
+CONTRACT_FILE = HERE / "files" / "dogovor_obrazec.pdf"
+CONTRACT_NAME = "Образец договора DirectAI (Китай).pdf"
+if CONTRACT_FILE.exists():
+    TOOLS.append({
+        "type": "function",
+        "function": {
+            "name": "send_contract_sample",
+            "description": "Отправить клиенту файл с образцом агентского договора (Китай). Используй, когда клиент "
+                           "просит договор, хочет посмотреть условия, сроки или гарантии по договору.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    })
+
+
+async def send_contract(chat_id: int):
+    r = await http.post(f"{TG}/sendDocument",
+                        data={"chat_id": str(chat_id),
+                              "caption": "Образец нашего агентского договора. Цифры и данные заполняются под вас."},
+                        files={"document": (CONTRACT_NAME, CONTRACT_FILE.read_bytes(), "application/pdf")})
+    if not r.json().get("ok"):
+        raise RuntimeError(f"sendDocument: {r.text[:200]}")
+
+
 class LLMError(Exception):
     pass
 
@@ -333,6 +356,12 @@ async def reply_with_llm(chat_id: int, user_text: str):
                     result = ("ok: готовый ответ отправлен клиенту. Не пересказывай его. Если клиент спрашивал "
                               "ещё что-то — ответь коротко; иначе можешь задать один короткий вопрос или "
                               "вернуть пустой ответ.")
+                elif name == "send_contract_sample" and CONTRACT_FILE.exists():
+                    await send_contract(chat_id)
+                    save_msg(chat_id, "system", "Служебно: образец договора уже отправлен клиенту.")
+                    event("contract")
+                    result = ("ok: файл договора отправлен. Если клиент спрашивал о конкретном условии (сроки и т.п.) "
+                              "— коротко процитируй его из базы знаний.")
                 else:
                     result = f"нет инструмента {name}"
             except Exception as e:
