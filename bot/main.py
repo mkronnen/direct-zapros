@@ -37,6 +37,7 @@ DAILY_REPORT_HOUR = 9                       # суточный отчёт в 09:
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("bot")
+logging.getLogger("httpx").setLevel(logging.WARNING)  # иначе в журнал попадает URL с токеном бота
 
 # ---------------------------------------------------------------- хранилище
 
