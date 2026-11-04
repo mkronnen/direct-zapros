@@ -24,7 +24,7 @@ ADMIN_CHAT_ID = int(os.environ["ADMIN_CHAT_ID"])
 LEADS_CHAT_ID = int(os.environ.get("LEADS_CHAT_ID", ADMIN_CHAT_ID))
 DATA_DIR = Path(os.environ.get("DATA_DIR", "./data"))
 MODELS = [m.strip() for m in os.environ.get(
-    "GROQ_MODELS", "openai/gpt-oss-120b,llama-3.3-70b-versatile").split(",") if m.strip()]
+    "GROQ_MODELS", "openai/gpt-oss-120b,openai/gpt-oss-20b").split(",") if m.strip()]
 
 HERE = Path(__file__).parent
 TG = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -221,33 +221,42 @@ class LLMError(Exception):
 
 async def llm(messages: list) -> dict:
     """Запрос к Groq. При лимите/сбое пробуем следующую модель из списка."""
-    last_err = ""
+    errors = []
     for model in MODELS:
         body = {"model": model, "messages": messages, "tools": TOOLS, "tool_choice": "auto",
                 "temperature": 0.5, "max_completion_tokens": 2000}
         if "gpt-oss" in model:
             body["reasoning_effort"] = os.environ.get("REASONING_EFFORT", "medium")
-        for attempt in range(2):
+        for attempt in range(3):
             try:
                 r = await http.post(GROQ_URL, json=body, timeout=60,
                                     headers={"Authorization": f"Bearer {GROQ_API_KEY}"})
             except httpx.HTTPError as e:
-                last_err = f"{model}: сеть: {e!r}"
+                errors.append(f"{model}: сеть: {e!r}")
                 await asyncio.sleep(2)
                 continue
             if r.status_code == 200:
                 event("llm_ok")
                 return r.json()["choices"][0]["message"]
-            last_err = f"{model}: HTTP {r.status_code}: {r.text[:300]}"
+            errors.append(f"{model}: HTTP {r.status_code}: {r.text[:250]}")
             if r.status_code == 400 and "reasoning_effort" in body:
                 body.pop("reasoning_effort")
                 continue
-            if r.status_code == 429 or r.status_code >= 500:
-                await asyncio.sleep(2 * (attempt + 1))
-                if attempt == 0 and r.status_code >= 500:
+            if r.status_code == 429:
+                event("rate_limit")
+                try:
+                    wait = float(r.headers.get("retry-after", "5"))
+                except ValueError:
+                    wait = 5
+                if wait <= 25 and attempt < 2:
+                    await asyncio.sleep(wait + 0.5)
                     continue
+                break  # долго ждать — пробуем следующую модель
+            if r.status_code >= 500 and attempt < 2:
+                await asyncio.sleep(2 * (attempt + 1))
+                continue
             break  # следующая модель
-    raise LLMError(last_err)
+    raise LLMError("\n".join(errors[-4:]))
 
 
 MD_RE = re.compile(r"(\*\*|__|^#+\s*|`)", re.M)
@@ -368,6 +377,9 @@ async def reply_with_llm(chat_id: int, user_text: str):
                 result = f"ошибка: {e}"
                 await report(f"сбой инструмента {name}", traceback.format_exc(), chat_id)
             messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
+        if all(c["function"]["name"] in ("send_prepared_answer", "send_contract_sample") for c in calls) \
+                and (sent_template or CONTRACT_FILE.exists()):
+            return  # готовые материалы отправлены — лишний запрос к нейросети не тратим
     if sent_template:
         return
     raise LLMError("слишком много вызовов инструментов подряд")
@@ -379,9 +391,16 @@ async def process(chat_id: int):
         parts = buffers.pop(chat_id, [])
         if not parts:
             return
+        sent_before = db.execute("SELECT COUNT(*) FROM messages WHERE chat_id=? AND role='assistant'",
+                                 (chat_id,)).fetchone()[0]
         try:
             await reply_with_llm(chat_id, "\n".join(parts))
         except LLMError as e:
+            sent_now = db.execute("SELECT COUNT(*) FROM messages WHERE chat_id=? AND role='assistant'",
+                                  (chat_id,)).fetchone()[0]
+            if sent_now > sent_before:   # клиенту уже что-то ушло в этом ходе — не пугаем его сбоем
+                await report("нейросеть не ответила (после отправки материалов)", str(e), chat_id)
+                return
             await report("нейросеть не ответила", str(e), chat_id)
             await safe_send(chat_id, "Секунду, у меня технический сбой. Я уже передал ваш вопрос менеджеру — "
                                      "он ответит в ближайшее время.")
@@ -454,7 +473,8 @@ def stats_text(hours: int) -> str:
             f"Новых клиентов: {cnt('new_user')}\n"
             f"Диалогов: {dialogs}, сообщений от клиентов: {msgs}\n"
             f"Заявок менеджеру: {cnt('lead')}\n"
-            f"Ответов нейросети: {cnt('llm_ok')}\n"
+            f"Ответов нейросети: {cnt('llm_ok')}, упёрлись в лимит Groq: {cnt('rate_limit')}\n"
+            f"Готовых ответов: {cnt('template')}, договоров отправлено: {cnt('contract')}\n"
             f"Ошибок: {cnt('error')}")
 
 
