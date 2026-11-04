@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Запрос подбора · Direct</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root {
+  --bg: var(--tg-theme-secondary-bg-color, #eef1f6);
+  --panel: var(--tg-theme-section-bg-color, var(--tg-theme-bg-color, #ffffff));
+  --ink: var(--tg-theme-text-color, #141a26);
+  --muted: var(--tg-theme-hint-color, #6b7587);
+  --line: color-mix(in srgb, var(--muted) 30%, transparent);
+  --field: var(--tg-theme-bg-color, #ffffff);
+  --accent: var(--tg-theme-button-color, #1d47c4);
+  --accent-ink: var(--tg-theme-button-text-color, #ffffff);
+  --head: var(--tg-theme-section-header-text-color, var(--muted));
+  --warn: #b26a00;
+  --warn-bg: color-mix(in srgb, #f0a020 16%, transparent);
+  --danger: var(--tg-theme-destructive-text-color, #d93a3a);
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--ink); font: 15px/1.45 var(--font);
+  padding: 12px max(12px, env(safe-area-inset-left)) 96px max(12px, env(safe-area-inset-right));
+  -webkit-tap-highlight-color: transparent;
+}
+.wrap { max-width: 640px; margin: 0 auto; display: grid; gap: 14px; }
+header { padding: 4px 4px 0; }
+h1 { font-size: 20px; margin: 0 0 2px; letter-spacing: -0.01em; }
+.window { font-size: 13px; color: var(--muted); }
+.window b { color: var(--ink); font-family: var(--mono); font-weight: 600; }
+.who { font-size: 13px; color: var(--muted); margin-top: 2px; }
+
+section { background: var(--panel); border-radius: 12px; padding: 14px; display: grid; gap: 12px; }
+h2 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--head); margin: 0; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 360px) { .row { grid-template-columns: 1fr; } }
+label { display: grid; gap: 5px; font-size: 13px; font-weight: 500; min-width: 0; }
+.hint { font-weight: 400; color: var(--muted); font-size: 12px; }
+input, select, textarea {
+  font: inherit; font-size: 16px; color: var(--ink); background: var(--field);
+  border: 1px solid var(--line); border-radius: 9px; padding: 10px 11px; width: 100%; min-width: 0;
+  -webkit-appearance: none; appearance: none;
+}
+select { background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 16px) 50%, calc(100% - 11px) 50%; background-size: 5px 5px; background-repeat: no-repeat; padding-right: 28px; }
+textarea { resize: vertical; min-height: 64px; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.invalid { border-color: var(--danger); }
+
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; background: var(--bg); padding: 3px; border-radius: 10px; }
+.seg label { display: block; position: relative; }
+.seg input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; pointer-events: none; }
+.seg span { display: block; text-align: center; padding: 8px 6px; border-radius: 8px; font-size: 14px; cursor: pointer; user-select: none; }
+.seg input:checked + span { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+
+.note { font-size: 12px; color: var(--muted); }
+.warn { font-size: 12px; color: var(--warn); background: var(--warn-bg); border-radius: 8px; padding: 7px 9px; }
+details { background: var(--panel); border-radius: 12px; padding: 12px 14px; }
+summary { cursor: pointer; font-size: 14px; font-weight: 600; }
+.rules { display: grid; gap: 6px; font-size: 13px; margin-top: 10px; }
+.rules div::before { content: "■ "; color: var(--accent); }
+pre { margin: 10px 0 0; font: 12.5px/1.6 var(--mono); white-space: pre-wrap; word-break: break-word; }
+
+.fallback-btn { display: none; position: fixed; left: 12px; right: 12px; bottom: max(12px, env(safe-area-inset-bottom));
+  font: inherit; font-weight: 600; font-size: 16px; border: 0; border-radius: 12px; padding: 14px; background: var(--accent); color: var(--accent-ink); max-width: 640px; margin: 0 auto; }
+.no-tg .fallback-btn { display: block; }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 84px; background: var(--ink); color: var(--panel);
+  padding: 10px 14px; border-radius: 10px; font-size: 14px; max-width: calc(100% - 32px); opacity: 0; pointer-events: none; transition: opacity .2s; }
+.toast.on { opacity: 1; }
+.done { text-align: center; padding: 40px 16px; display: none; }
+.done h2 { font-size: 20px; text-transform: none; letter-spacing: 0; color: var(--ink); margin-bottom: 8px; }
+.sent .form-area, .sent .fallback-btn { display: none !important; }
+.sent .done { display: block; }
+[data-mode="post"] .client-only { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app" data-mode="client">
+  <div class="form-area">
+    <header>
+      <h1>Запрос подбора · Китай б/у</h1>
+      <div class="window" id="windowLine">Окно выпуска: …</div>
+      <div class="who" id="who"></div>
+    </header>
+
+    <form id="f" autocomplete="off" novalidate style="display:grid;gap:14px;margin-top:14px">
+      <section>
+        <h2>Для кого</h2>
+        <div class="seg" role="radiogroup" aria-label="Режим">
+          <label><input type="radio" name="mode" id="modeClient" value="client" checked><span>Под клиента</span></label>
+          <label><input type="radio" name="mode" id="modePost" value="post"><span>Для поста</span></label>
+        </div>
+        <label class="client-only">Клиент <span class="hint">имя или город</span>
+          <input type="text" id="client" placeholder="Евгений, Москва">
+        </label>
+        <label id="nameWrap" hidden>Кто отправляет <span class="hint">ваше имя</span>
+          <input type="text" id="sender" placeholder="Имя сотрудника">
+        </label>
+      </section>
+
+      <section>
+        <h2>Автомобиль</h2>
+        <div class="row">
+          <label>Марка <input type="text" id="brand" placeholder="Volkswagen" autocapitalize="words"></label>
+          <label>Модель <input type="text" id="model" placeholder="Golf" autocapitalize="words"></label>
+        </div>
+        <label>Комплектация <span class="hint">пусто = любая</span>
+          <input type="text" id="trim" placeholder="280TSI DSG">
+        </label>
+        <div class="row">
+          <label>Выпуск с <span class="hint" id="minHint"></span><input type="month" id="from"></label>
+          <label>Выпуск по <span class="hint" id="maxHint"></span><input type="month" id="to"></label>
+        </div>
+        <div class="warn" id="dateWarn" hidden></div>
+        <div class="row">
+          <label>Пробег до, км <span class="hint">пусто = любой</span><input type="number" inputmode="numeric" id="mileage" class="num" min="0" step="1000" placeholder="60000"></label>
+          <label>Цвет <span class="hint">пусто = любой</span><input type="text" id="color" placeholder="белый, серый"></label>
+        </div>
+      </section>
+
+      <section>
+        <h2>Состояние</h2>
+        <div class="seg" role="radiogroup" aria-label="Состояние">
+          <label><input type="radio" name="cond" id="condStrict" value="strict" checked><span>Металл не тронут</span></label>
+          <label><input type="radio" name="cond" id="condTol" value="tol"><span>С допусками</span></label>
+        </div>
+        <label id="tolWrap" hidden>Что допускается <span class="hint">всё остальное — пропуск</span>
+          <textarea id="tolerance" placeholder="например: окрас переднего бампера, 1 окрашенная деталь без рихтовки"></textarea>
+        </label>
+      </section>
+
+      <section>
+        <h2>Деньги</h2>
+        <label class="client-only">Бюджет до Уссурийска, ₽ <span class="hint">автовоз уже вычтен</span>
+          <input type="number" inputmode="numeric" id="budget" class="num" min="0" step="10000" placeholder="2300000">
+        </label>
+        <div class="row">
+          <label>Комиссия, ₽
+            <select id="commission" class="num">
+              <option value="35000" selected>35 000</option>
+              <option value="45000">45 000</option>
+              <option value="50000">50 000</option>
+            </select>
+          </label>
+          <label>Маржа, ¥
+            <select id="margin" class="num">
+              <option value="auto" selected>По бюджету</option>
+              <option value="14000">14 000</option>
+              <option value="13000">13 000</option>
+              <option value="12000">12 000</option>
+              <option value="11000">11 000</option>
+              <option value="10000">10 000</option>
+              <option value="9000">9 000</option>
+            </select>
+          </label>
+        </div>
+        <div class="note" id="marginNote"></div>
+      </section>
+
+      <section>
+        <h2>Объём проверки</h2>
+        <label>Ссылок китайцам <span class="hint">сколько машин отправить на проверку</span>
+          <input type="number" inputmode="numeric" id="links" class="num" min="1" max="30" value="10">
+        </label>
+        <label>Комментарий <span class="hint">по желанию</span>
+          <textarea id="comment" placeholder="например: клиенту важен люк, без такси"></textarea>
+        </label>
+      </section>
+
+      <details>
+        <summary>Правила, которые действуют всегда</summary>
+        <div class="rules">
+          <div>Только ДВС. Гибриды и электромобили — пропуск.</div>
+          <div>Мощность до 159 л.с. 160 л.с. и больше (≈118 кВт на шильдике) — пропуск.</div>
+          <div>Возраст на таможне 3–5 лет, доставка до 8 недель.</div>
+          <div>Возраст и кВт — по шильдику или дате выпуска из ответа китайцев. Нет данных — пропуск.</div>
+        </div>
+      </details>
+
+      <details>
+        <summary>Как будет выглядеть запрос</summary>
+        <pre id="out"></pre>
+      </details>
+    </form>
+  </div>
+
+  <div class="done">
+    <h2>Запрос отправлен ✓</h2>
+    <div class="note" id="doneNote">Артём получил запрос и возьмёт его в работу.</div>
+  </div>
+</div>
+
+<button type="button" class="fallback-btn" id="sendBtn">Отправить запрос</button>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* Адрес Apps Script (/exec), куда уходит запрос. Заполняется при развёртывании. */
+const API_URL = "https://script.google.com/macros/s/AKfycbw6ZC-gl_XwI52EbV5mZ6BwvLJaqcM2RtnmmqdRoh4CZrXa001xkmobI8GkPW-MnWfLiw/exec";
+
+(function () {
+  const tg = window.Telegram && window.Telegram.WebApp;
+  const inTg = !!(tg && tg.initData);
+  const $ = (id) => document.getElementById(id);
+
+  if (tg) { try { tg.ready(); tg.expand(); tg.setHeaderColor("secondary_bg_color"); tg.setBackgroundColor("secondary_bg_color"); } catch (e) {} }
+  if (!inTg) { document.body.classList.add("no-tg"); $("nameWrap").hidden = false; }
+
+  const user = inTg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+  if (user) {
+    $("who").textContent = "Отправитель: " + [user.first_name, user.last_name].filter(Boolean).join(" ") + (user.username ? " (@" + user.username + ")" : "");
+  }
+
+  const MM = ["01","02","03","04","05","06","07","08","09","10","11","12"];
+  const now = new Date();
+  const curIdx = now.getFullYear() * 12 + now.getMonth();
+  const minIdx = curIdx - 57;   // < 5 полных лет на таможне при доставке до 2 мес.
+  const maxIdx = curIdx - 33;   // ≥ 3 полных лет на таможне с запасом 4 мес.
+  const toISO = (i) => Math.floor(i / 12) + "-" + MM[i % 12];
+  const toRu = (i) => MM[i % 12] + "." + Math.floor(i / 12);
+  const fromISO = (s) => { if (!s) return null; const [y, m] = s.split("-").map(Number); return y * 12 + (m - 1); };
+  const fmt = (n) => Number(n).toLocaleString("ru-RU").replace(/\s/g, " ");
+
+  $("windowLine").innerHTML = "Окно выпуска сейчас: <b>" + toRu(minIdx) + " — " + toRu(maxIdx) + "</b>";
+  $("minHint").textContent = "не раньше " + toRu(minIdx);
+  $("maxHint").textContent = "не позже " + toRu(maxIdx);
+  ["from", "to"].forEach((id) => { $(id).min = toISO(minIdx); $(id).max = toISO(maxIdx); });
+  $("from").value = toISO(minIdx);
+  $("to").value = toISO(maxIdx);
+
+  const FIELDS = ["client","sender","brand","model","trim","from","to","mileage","color","tolerance","budget","commission","margin","links","comment"];
+  const KEY = "direct-miniapp-draft-v1";
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(KEY); if (!raw) return;
+      const d = JSON.parse(raw);
+      FIELDS.forEach((k) => { if (d[k] !== undefined && $(k)) $(k).value = d[k]; });
+      if (d.mode === "post") $("modePost").checked = true;
+      if (d.cond === "tol") $("condTol").checked = true;
+      // окно выпуска сдвигается каждый месяц — старые даты не тащим
+      $("from").value = toISO(minIdx); $("to").value = toISO(maxIdx);
+    } catch (e) {}
+  }
+  const save = (d) => { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch (e) {} };
+  const clearDraft = () => { try { localStorage.removeItem(KEY); } catch (e) {} };
+
+  function read() {
+    const d = {};
+    FIELDS.forEach((k) => d[k] = $(k).value.trim());
+    d.mode = document.querySelector("input[name=mode]:checked").value;
+    d.cond = document.querySelector("input[name=cond]:checked").value;
+    return d;
+  }
+
+  function windowOf(d) {
+    let f = fromISO(d.from) ?? minIdx, t = fromISO(d.to) ?? maxIdx;
+    const msgs = [];
+    if (f < minIdx) { msgs.push("«Выпуск с» раньше окна — поставлено " + toRu(minIdx) + "."); f = minIdx; }
+    if (t > maxIdx) { msgs.push("«Выпуск по» позже окна — поставлено " + toRu(maxIdx) + "."); t = maxIdx; }
+    if (f > t) msgs.push("«Выпуск с» позже «по» — проверь даты.");
+    return { f, t, msgs, bad: f > t };
+  }
+
+  function senderName() {
+    if (user) return [user.first_name, user.last_name].filter(Boolean).join(" ") + (user.username ? " (@" + user.username + ")" : "");
+    return $("sender").value.trim() || "не указан";
+  }
+
+  function buildText(d, w) {
+    const marginLine = d.margin === "auto"
+      ? (d.mode === "client"
+          ? "14 000 ¥, если КП влезает в бюджет; иначе снижать до 9 000 ¥. Не влезает и с 9 000 — посчитать с 10 000 ¥ и прислать Артёму."
+          : "10 000 ¥ (по умолчанию).")
+      : fmt(d.margin) + " ¥ (задано вручную).";
+    const L = [];
+    L.push("ЗАПРОС ПОДБОРА — " + now.toLocaleDateString("ru-RU"));
+    L.push("От: " + senderName());
+    L.push("Режим: " + (d.mode === "client" ? "под клиента" + (d.client ? " (" + d.client + ")" : "") : "для поста, по рынку"));
+    L.push("Авто: " + ([d.brand, d.model].filter(Boolean).join(" ") || "любое (по рынку)"));
+    L.push("Комплектация: " + (d.trim || "любая"));
+    L.push("Выпуск: " + toRu(w.f) + " – " + toRu(w.t) + " (3–5 лет на таможне)");
+    L.push("Пробег: " + (d.mileage ? "до " + fmt(d.mileage) + " км" : "любой"));
+    L.push("Цвет: " + (d.color || "любой"));
+    L.push("Двигатель: только ДВС, до 159 л.с. (160+ — пропуск)");
+    L.push("Состояние: " + (d.cond === "tol" && d.tolerance ? "допускается — " + d.tolerance + "; всё остальное — пропуск" : "металл не тронут (любой окрас/рихтовка/замена — пропуск)"));
+    if (d.mode === "client") L.push("Бюджет до Уссурийска: " + (d.budget ? fmt(d.budget) + " ₽ (автовоз вычтен)" : "не задан"));
+    L.push("Комиссия: " + fmt(d.commission) + " ₽");
+    L.push("Маржа: " + marginLine);
+    L.push("Ссылок на проверку китайцам: " + (d.links || "10"));
+    if (d.comment) L.push("Комментарий: " + d.comment);
+    return L.join("\n");
+  }
+
+  function render() {
+    const d = read();
+    $("app").dataset.mode = d.mode;
+    $("tolWrap").hidden = d.cond !== "tol";
+    const w = windowOf(d);
+    $("dateWarn").hidden = !w.msgs.length;
+    $("dateWarn").textContent = w.msgs.join(" ");
+    $("marginNote").textContent = d.margin === "auto"
+      ? (d.mode === "client" ? "14 000 ¥, если влезает в бюджет, иначе снижаем до 9 000 ¥." : "Для поста — 10 000 ¥.")
+      : "Маржа зафиксирована, бюджет на неё не влияет.";
+    $("out").textContent = buildText(d, w);
+    save(d);
+    return { d, w };
+  }
+
+  function toast(msg) {
+    const t = $("toast"); t.textContent = msg; t.classList.add("on");
+    clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("on"), 2600);
+  }
+  function fail(msg) {
+    toast(msg);
+    try { tg && tg.HapticFeedback.notificationOccurred("error"); } catch (e) {}
+  }
+
+  function validate(d, w) {
+    ["brand", "model", "budget", "sender"].forEach((k) => $(k).classList.remove("invalid"));
+    if (d.mode === "client") {
+      if (!d.brand) { $("brand").classList.add("invalid"); return "Укажи марку."; }
+      if (!d.model) { $("model").classList.add("invalid"); return "Укажи модель."; }
+      if (!d.budget) { $("budget").classList.add("invalid"); return "Укажи бюджет клиента."; }
+    }
+    if (!inTg && !d.sender) { $("sender").classList.add("invalid"); return "Укажи, кто отправляет."; }
+    if (w.bad) return "«Выпуск с» позже «Выпуск по».";
+    return "";
+  }
+
+  let sending = false;
+  function setLoading(on) {
+    sending = on;
+    if (tg && tg.MainButton) { on ? tg.MainButton.showProgress(false) : tg.MainButton.hideProgress(); }
+    $("sendBtn").disabled = on; $("sendBtn").textContent = on ? "Отправляю…" : "Отправить запрос";
+  }
+
+  async function send() {
+    if (sending) return;
+    const { d, w } = render();
+    const err = validate(d, w);
+    if (err) return fail(err);
+    if (!API_URL || API_URL.indexOf("__") === 0) return fail("Сервер ещё не подключён.");
+
+    const payload = {
+      initData: inTg ? tg.initData : "",
+      sender: senderName(),
+      mode: d.mode, client: d.client, brand: d.brand, model: d.model, trim: d.trim,
+      from: toRu(w.f), to: toRu(w.t), mileage: d.mileage, color: d.color,
+      cond: d.cond, tolerance: d.tolerance, budget: d.mode === "client" ? d.budget : "",
+      commission: d.commission, margin: d.margin, links: d.links || "10", comment: d.comment,
+      text: buildText(d, w)
+    };
+
+    setLoading(true);
+    try {
+      const res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload) });
+      const j = await res.json().catch(() => ({}));
+      if (!j.ok) throw new Error(j.error || ("HTTP " + res.status));
+      clearDraft();
+      if (j.id) $("doneNote").textContent = "Запрос №" + j.id + " у Артёма. Он возьмёт его в работу.";
+      document.body.classList.add("sent");
+      if (tg) {
+        try { tg.HapticFeedback.notificationOccurred("success"); } catch (e) {}
+        try { tg.MainButton.hide(); } catch (e) {}
+        setTimeout(() => { try { tg.close(); } catch (e) {} }, 1800);
+      }
+    } catch (e) {
+      fail("Не отправилось: " + (e.message || "нет связи") + ". Попробуй ещё раз.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (inTg && tg.MainButton) {
+    tg.MainButton.setParams({ text: "Отправить запрос", is_visible: true, is_active: true });
+    tg.MainButton.onClick(send);
+  }
+  $("sendBtn").addEventListener("click", send);
+
+  const onModeOrCond = () => { render(); };
+  load();
+  $("f").addEventListener("input", render);
+  $("f").addEventListener("change", onModeOrCond);
+  $("f").addEventListener("submit", (e) => { e.preventDefault(); send(); });
+  render();
+})();
+</script>
+</body>
+</html>
