@@ -213,7 +213,14 @@ def clean(text: str) -> str:
 
 # ---------------------------------------------------------------- заявки
 
-async def do_send_lead(chat_id: int, user: dict, args: dict) -> str:
+HUMAN_RE = re.compile(r"менеджер|человек|оператор|живо|позвон|созвон|связат|свяжит|оплат|предоплат|реквизит|"
+                      r"договор|торг|скидк|сделк|отправьте|передайте", re.I)
+
+
+async def do_send_lead(chat_id: int, user: dict, args: dict, last_user_text: str = "") -> str:
+    if args.get("type") == "вопрос менеджеру" and not HUMAN_RE.search(last_user_text):
+        return ("не отправлено: клиент не просил менеджера. Ответь сам; если это вопрос о цене — "
+                "объясни, от чего она зависит, и спроси год и бюджет")
     if args.get("type") in ("подбор", "конкретная машина") and not (args.get("car") and args.get("budget")):
         return "не отправлено: для заявки на подбор нужны модель и бюджет — сначала спроси у клиента недостающее"
     cur = db.execute("INSERT INTO leads (chat_id, type, data, ts) VALUES (?, ?, ?, ?)",
@@ -287,7 +294,8 @@ async def reply_with_llm(chat_id: int, user_text: str):
             name = call["function"]["name"]
             try:
                 args = json.loads(call["function"].get("arguments") or "{}")
-                result = await do_send_lead(chat_id, user, args) if name == "send_lead" else f"нет инструмента {name}"
+                result = (await do_send_lead(chat_id, user, args, user_text) if name == "send_lead"
+                          else f"нет инструмента {name}")
                 if result.startswith("ok"):
                     save_msg(chat_id, "system", f"Служебно: {result.split(': ', 1)[1]}. Повторно не отправляй.")
             except Exception as e:
