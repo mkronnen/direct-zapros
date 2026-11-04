@@ -169,6 +169,29 @@ TOOLS = [{
 }]
 
 
+# Готовые ответы Артёма: bot/answers/<имя>.txt. Первая строка — «# когда отправлять», дальше — текст.
+# Текст уходит клиенту дословно, нейросеть его не переписывает.
+ANSWERS = {}
+for f in sorted((HERE / "answers").glob("*.txt")) if (HERE / "answers").exists() else []:
+    lines = f.read_text(encoding="utf-8").strip().splitlines()
+    if lines and lines[0].startswith("#") and len(lines) > 1:
+        ANSWERS[f.stem] = {"when": lines[0].lstrip("# ").strip(), "text": "\n".join(lines[1:]).strip()}
+
+if ANSWERS:
+    TOOLS.append({
+        "type": "function",
+        "function": {
+            "name": "send_prepared_answer",
+            "description": "Отправить клиенту готовый ответ Артёма дословно. ВСЕГДА используй его, если вопрос "
+                           "клиента подходит под тему, вместо того чтобы отвечать своими словами. Темы: " +
+                           "; ".join(f"«{k}» — {v['when']}" for k, v in ANSWERS.items()),
+            "parameters": {"type": "object",
+                           "properties": {"topic": {"type": "string", "enum": list(ANSWERS)}},
+                           "required": ["topic"]},
+        },
+    })
+
+
 class LLMError(Exception):
     pass
 
@@ -279,12 +302,15 @@ async def reply_with_llm(chat_id: int, user_text: str):
     await tg("sendChatAction", chat_id=chat_id, action="typing")
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history(chat_id)
     user = users.get(chat_id, {})
+    sent_template = False
     for _ in range(3):  # максимум 3 круга вызова инструментов
         msg = await llm(messages)
         calls = msg.get("tool_calls") or []
         if not calls:
             text = clean(msg.get("content"))
             if not text:
+                if sent_template:   # готовый ответ уже ушёл — добавлять нечего
+                    return
                 raise LLMError("пустой ответ модели")
             save_msg(chat_id, "assistant", text)
             await send(chat_id, text)
@@ -294,14 +320,27 @@ async def reply_with_llm(chat_id: int, user_text: str):
             name = call["function"]["name"]
             try:
                 args = json.loads(call["function"].get("arguments") or "{}")
-                result = (await do_send_lead(chat_id, user, args, user_text) if name == "send_lead"
-                          else f"нет инструмента {name}")
-                if result.startswith("ok"):
-                    save_msg(chat_id, "system", f"Служебно: {result.split(': ', 1)[1]}. Повторно не отправляй.")
+                if name == "send_lead":
+                    result = await do_send_lead(chat_id, user, args, user_text)
+                    if result.startswith("ok"):
+                        save_msg(chat_id, "system", f"Служебно: {result.split(': ', 1)[1]}. Повторно не отправляй.")
+                elif name == "send_prepared_answer" and args.get("topic") in ANSWERS and not sent_template:
+                    text = ANSWERS[args["topic"]]["text"]
+                    await send(chat_id, text)
+                    save_msg(chat_id, "assistant", text)
+                    event("template")
+                    sent_template = True
+                    result = ("ok: готовый ответ отправлен клиенту. Не пересказывай его. Если клиент спрашивал "
+                              "ещё что-то — ответь коротко; иначе можешь задать один короткий вопрос или "
+                              "вернуть пустой ответ.")
+                else:
+                    result = f"нет инструмента {name}"
             except Exception as e:
                 result = f"ошибка: {e}"
-                await report("не удалось передать заявку", traceback.format_exc(), chat_id)
+                await report(f"сбой инструмента {name}", traceback.format_exc(), chat_id)
             messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
+    if sent_template:
+        return
     raise LLMError("слишком много вызовов инструментов подряд")
 
 
