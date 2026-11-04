@@ -377,8 +377,14 @@ async def reply_with_llm(chat_id: int, user_text: str):
                 result = f"ошибка: {e}"
                 await report(f"сбой инструмента {name}", traceback.format_exc(), chat_id)
             messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
-        if all(c["function"]["name"] in ("send_prepared_answer", "send_contract_sample") for c in calls) \
-                and (sent_template or CONTRACT_FILE.exists()):
+        if all(c["function"]["name"] in ("send_prepared_answer", "send_contract_sample") for c in calls):
+            names = {c["function"]["name"] for c in calls}
+            # клиент просил договор, а модель про него забыла — отправляем сами
+            if ("send_contract_sample" not in names and CONTRACT_FILE.exists()
+                    and re.search(r"договор", user_text, re.I)):
+                await send_contract(chat_id)
+                save_msg(chat_id, "system", "Служебно: образец договора уже отправлен клиенту.")
+                event("contract")
             return  # готовые материалы отправлены — лишний запрос к нейросети не тратим
     if sent_template:
         return
