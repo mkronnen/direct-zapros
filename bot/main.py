@@ -178,9 +178,9 @@ async def llm(messages: list) -> dict:
     last_err = ""
     for model in MODELS:
         body = {"model": model, "messages": messages, "tools": TOOLS, "tool_choice": "auto",
-                "temperature": 0.5, "max_completion_tokens": 700}
+                "temperature": 0.5, "max_completion_tokens": 2000}
         if "gpt-oss" in model:
-            body["reasoning_effort"] = "low"
+            body["reasoning_effort"] = os.environ.get("REASONING_EFFORT", "medium")
         for attempt in range(2):
             try:
                 r = await http.post(GROQ_URL, json=body, timeout=60,
