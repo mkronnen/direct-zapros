@@ -62,7 +62,7 @@ def kb(chat_id: int | None = None) -> dict:
     promo = kv_get(f"promo:{chat_id}") if chat_id else None
     if promo:
         url += ("&" if "?" in url else "?") + "promo=" + promo
-    return {"keyboard": [[{"text": BTN_APP, "web_app": {"url": url}}],
+    return {"keyboard": [[{"text": BTN_APP, "web_app": {"url": url}, "style": "danger"}],   # danger = красная кнопка
                          [{"text": BTN_CHANNEL}, {"text": BTN_CHAT}],
                          [{"text": BTN_STEPS}, {"text": BTN_CONTRACT}],
                          [{"text": BTN_REVIEWS}, {"text": BTN_CONTACTS}]],
