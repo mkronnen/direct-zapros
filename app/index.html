@@ -327,13 +327,15 @@ $("car").addEventListener("touchend", e => { if (sx === null) return; const dx =
 
 // ===== контакты (общий блок для обеих форм) =====
 const tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+// промокод из реферальной ссылки бота (бот подставляет ?promo=... в адрес приложения)
+const REF_PROMO = (new URLSearchParams(location.search).get("promo") || "").replace(/[^\w-]/g, "").slice(0, 32);
 function contactsHTML(p){
   return `<div class="f" id="${p}NameF"><label>Как к вам обращаться <i>*</i></label><input id="${p}Name" autocomplete="given-name" value="${esc(tgUser ? tgUser.first_name || "" : "")}"></div>
     <div class="f" id="${p}PhoneF"><label>Номер телефона <i>*</i></label><input id="${p}Phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+7 ___ ___-__-__"></div>
     <div class="f" id="${p}ContactF"><span class="lbl">Как удобнее связаться <i>*</i></span>
       <div class="seg" data-name="${p}contact"><button type="button" data-v="tg">Telegram</button><button type="button" data-v="wa">WhatsApp</button><button type="button" data-v="call">Звонок</button></div>
       <div class="hintline" id="${p}TgHint" style="display:none">Напишем вам здесь, в Telegram${tgUser && tgUser.username ? " — @" + esc(tgUser.username) : ""}</div></div>
-    <div class="f"><label>Промокод</label><input id="${p}Promo" placeholder="Если есть" autocapitalize="characters"></div>`;
+    <div class="f"><label>Промокод</label><input id="${p}Promo" placeholder="Если есть" autocapitalize="characters" value="${esc(REF_PROMO)}"></div>`;
 }
 document.addEventListener("click", e => {
   const b = e.target.closest(".seg button"); if (!b) return;
