@@ -15,6 +15,7 @@ import html
 import json
 import logging
 import os
+import re
 import sqlite3
 import time
 import traceback
@@ -47,22 +48,36 @@ BTN_STEPS = "📋 Этапы работы"
 BTN_CONTRACT = "📄 Образец договора"
 BTN_REVIEWS = "⭐ Отзывы"
 BTN_CONTACTS = "📍 Контакты"
+BTN_CHANNEL = "📢 Наш канал"
+BTN_CHAT = "💬 Наш чат"
 
-KEYBOARD = {"keyboard": [[{"text": BTN_APP, "web_app": {"url": APP_URL}}],
+CHANNEL_URL = "https://t.me/directautoimport"
+CHAT_URL = "https://t.me/+0WVWNO0CagM5ZTIy"
+REVIEWS_URL = "https://t.me/+qnIV-9KL7lYwNDUy"
+
+
+def kb(chat_id: int | None = None) -> dict:
+    """Клавиатура снизу. Если клиент пришёл по реферальной ссылке — промокод уходит в мини-приложение."""
+    url = APP_URL
+    promo = kv_get(f"promo:{chat_id}") if chat_id else None
+    if promo:
+        url += ("&" if "?" in url else "?") + "promo=" + promo
+    return {"keyboard": [[{"text": BTN_APP, "web_app": {"url": url}}],
+                         [{"text": BTN_CHANNEL}, {"text": BTN_CHAT}],
                          [{"text": BTN_STEPS}, {"text": BTN_CONTRACT}],
                          [{"text": BTN_REVIEWS}, {"text": BTN_CONTACTS}]],
             "resize_keyboard": True, "is_persistent": True}
 
-CHANNEL_URL = "https://t.me/directautoimport"
 
 WELCOME = (
     "Здравствуйте! Это бот <b>ПрямойАвтоИмпорт</b> — привозим автомобили под заказ из Китая, Кореи и Японии.\n\n"
     "🚗 <b>Каталог и подбор</b> — машины в наличии с фото и ценой до Уссурийска или заявка на подбор под ваш запрос\n"
+    "📢 <b>Наш канал</b> — подборки, кейсы, новости\n"
+    "💬 <b>Наш чат</b> — общение с клиентами и командой\n"
     "📋 <b>Этапы работы</b> — как проходит покупка\n"
     "📄 <b>Образец договора</b> — наш агентский договор\n"
     "⭐ <b>Отзывы</b> — что говорят клиенты\n"
     "📍 <b>Контакты</b> — где мы находимся и как связаться\n\n"
-    f"Подборки и кейсы — в нашем <a href=\"{CHANNEL_URL}\">Telegram-канале</a>.\n\n"
     "Выбирайте кнопками ниже 👇 или просто напишите вопрос — его получит менеджер."
 )
 
@@ -79,7 +94,7 @@ CONTACTS = (
 
 REVIEWS = "⭐ Отзывы наших клиентов — видео с получения, истории покупок и кейсы:"
 REVIEWS_BUTTONS = {"inline_keyboard": [
-    [{"text": "Отзывы в Telegram", "url": "https://t.me/directautoimport/reviews"}],
+    [{"text": "Отзывы в Telegram", "url": REVIEWS_URL}],
     [{"text": "Мы во ВКонтакте", "url": "https://vk.ru/direct_ai"}],
     [{"text": "Наш сайт", "url": "https://directautoimport.ru"}],
 ]}
@@ -237,23 +252,23 @@ async def send_welcome(chat_id: int):
     try:
         if WELCOME_IMG.exists():
             await send_file("sendPhoto", "photo", chat_id, WELCOME_IMG, "welcome.jpg", "image/jpeg",
-                            caption=WELCOME, parse_mode="HTML", reply_markup=KEYBOARD)
+                            caption=WELCOME, parse_mode="HTML", reply_markup=kb(chat_id))
             return
     except Exception:
         await report("не отправилось фото приветствия", traceback.format_exc(), chat_id)
-    await send(chat_id, WELCOME, parse_mode="HTML", reply_markup=KEYBOARD)
+    await send(chat_id, WELCOME, parse_mode="HTML", reply_markup=kb(chat_id))
 
 
 async def send_contract(chat_id: int):
     await send_file("sendDocument", "document", chat_id, CONTRACT_FILE, CONTRACT_NAME, "application/pdf",
                     caption="Образец нашего агентского договора. Цифры и данные заполняются под вас.",
-                    reply_markup=KEYBOARD)
+                    reply_markup=kb(chat_id))
 
 
 async def on_menu(chat_id: int, text: str) -> bool:
     """Нажатие кнопки меню. True — если обработали."""
     if text == BTN_STEPS:
-        await send(chat_id, STEPS, reply_markup=KEYBOARD)
+        await send(chat_id, STEPS, reply_markup=kb(chat_id))
         event("steps")
     elif text == BTN_CONTRACT:
         await send_contract(chat_id)
@@ -262,15 +277,55 @@ async def on_menu(chat_id: int, text: str) -> bool:
         await send(chat_id, REVIEWS, reply_markup=REVIEWS_BUTTONS)
         event("reviews")
     elif text == BTN_CONTACTS:
-        await send(chat_id, CONTACTS, parse_mode="HTML", reply_markup=KEYBOARD)
+        await send(chat_id, CONTACTS, parse_mode="HTML", reply_markup=kb(chat_id))
         event("contacts")
+    elif text == BTN_CHANNEL:
+        await send(chat_id, "📢 Наш канал — подборки машин, кейсы клиентов, новости рынка и промокоды.",
+                   reply_markup={"inline_keyboard": [[{"text": "Перейти в канал", "url": CHANNEL_URL}]]})
+        event("channel")
+    elif text == BTN_CHAT:
+        await send(chat_id, "💬 Наш чат — задавайте вопросы, общайтесь с клиентами и командой.",
+                   reply_markup={"inline_keyboard": [[{"text": "Перейти в чат", "url": CHAT_URL}]]})
+        event("chat")
     elif text == BTN_APP:   # нажали кнопку как текст (старый клиент Telegram без мини-приложений)
         await send(chat_id, "Откройте каталог кнопкой «🚗 Каталог и подбор» внизу экрана. Если она не открывается — "
                             "обновите Telegram или напишите, какую машину ищете, и менеджер ответит здесь.",
-                   reply_markup=KEYBOARD)
+                   reply_markup=kb(chat_id))
     else:
         return False
     return True
+
+
+# ---------------------------------------------------------------- реферальные ссылки
+# Ссылка вида https://t.me/<бот>?start=КОД — Telegram присылает боту "/start КОД".
+# Код (латиница, цифры, _ и -) запоминается за клиентом навсегда: учитывается первая ссылка,
+# по которой человек пришёл, и подставляется промокодом в заявки.
+
+REF_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+async def save_ref(chat_id: int, user: dict, text: str):
+    parts = text.split(maxsplit=1)
+    code = parts[1].strip() if len(parts) > 1 else ""
+    if not REF_RE.match(code) or kv_get(f"promo:{chat_id}"):
+        return
+    kv_set(f"promo:{chat_id}", code)
+    event(f"ref:{code}")
+    if chat_id != ADMIN_CHAT_ID:
+        await send(LEADS_CHAT_ID, f"🎟 Новый клиент по ссылке с промокодом <b>{html.escape(code)}</b>: "
+                                  f"{user_link(chat_id, user)}", parse_mode="HTML")
+
+
+def promo_line(chat_id: int, typed: str | None) -> str:
+    ref = kv_get(f"promo:{chat_id}")
+    typed = (typed or "").strip()
+    if typed and ref and typed.upper() != ref.upper():
+        return f"Промокод: {html.escape(typed)} (пришёл по ссылке {html.escape(ref)})"
+    if typed:
+        return f"Промокод: {html.escape(typed)}"
+    if ref:
+        return f"Промокод: {html.escape(ref)} (по ссылке)"
+    return "Промокод: —"
 
 
 # ---------------------------------------------------------------- заявки из мини-приложения
@@ -308,7 +363,7 @@ async def on_webapp(chat_id: int, user: dict, raw: str):
     lines += ["", f"Имя: {e(d.get('name', ''))}", f"Телефон: {e(d.get('phone', ''))}",
               f"Связь: {e(CONTACT_LABEL.get(d.get('contact'), d.get('contact', '')))}"
               + (f" (@{e(user['username'])})" if d.get("contact") == "tg" and user.get("username") else ""),
-              f"Промокод: {e(d['promo'])}" if d.get("promo") else "Промокод: —",
+              promo_line(chat_id, d.get("promo")),
               "", "↩️ Ответьте на это сообщение — ответ уйдёт клиенту в бот."]
     if chat_id == ADMIN_CHAT_ID:
         lines.insert(0, "🧪 ТЕСТ")
@@ -316,7 +371,7 @@ async def on_webapp(chat_id: int, user: dict, raw: str):
     kv_set(f"relay:{LEADS_CHAT_ID}:{sent['message_id']}", chat_id)
     how = {"tg": "здесь, в Telegram", "wa": "в WhatsApp", "call": "по телефону"}.get(d.get("contact"), "")
     await send(chat_id, f"Заявка №{lead_id} отправлена менеджеру — он свяжется с вами {how} в ближайшее время. "
-                        "Если появятся вопросы, пишите сюда.", reply_markup=KEYBOARD)
+                        "Если появятся вопросы, пишите сюда.", reply_markup=kb(chat_id))
     save_msg(chat_id, "system", f"заявка №{lead_id} ({kind})")
 
 
@@ -328,7 +383,9 @@ async def forward_to_manager(msg: dict, user: dict):
     save_msg(chat_id, "user", text or "[вложение]")
     if msgs_last_hour(chat_id) > FORWARDS_PER_HOUR:
         return   # флуд — молча не пересылаем
+    ref = kv_get(f"promo:{chat_id}")
     head = await send(LEADS_CHAT_ID, f"💬 Сообщение в боте от {user_link(chat_id, user)}"
+                                     + (f" · промокод {html.escape(ref)}" if ref else "")
                                      + (" — 🧪 ТЕСТ" if chat_id == ADMIN_CHAT_ID else "")
                                      + "\n↩️ Ответьте на сообщение ниже — ответ уйдёт клиенту.", parse_mode="HTML")
     kv_set(f"relay:{LEADS_CHAT_ID}:{head['message_id']}", chat_id)
@@ -338,7 +395,7 @@ async def forward_to_manager(msg: dict, user: dict):
     # не отвечаем «передал» на каждое сообщение подряд — максимум раз в 10 минут
     if time.time() - float(kv_get(f"ack:{chat_id}", 0)) > 600:
         kv_set(f"ack:{chat_id}", time.time())
-        await send(chat_id, FORWARDED_OK, reply_markup=KEYBOARD)
+        await send(chat_id, FORWARDED_OK, reply_markup=kb(chat_id))
 
 
 async def relay_reply(msg: dict) -> bool:
@@ -388,6 +445,7 @@ async def on_message(msg: dict):
         return
     text = (msg.get("text") or "").strip()
     if text.startswith("/start"):
+        await save_ref(chat_id, user, text)
         await send_welcome(chat_id)
         event("start")
         return
@@ -423,8 +481,15 @@ def stats_text(hours: int) -> str:
             f"Заявок из приложения: {cnt('lead_app')}\n"
             f"Сообщений переслано вам: {cnt('forward')}, ваших ответов клиентам: {cnt('relay')}\n"
             f"Открыли: этапы {cnt('steps')}, договор {cnt('contract')}, отзывы {cnt('reviews')}, "
-            f"контакты {cnt('contacts')}\n"
-            f"Ошибок: {cnt('error')}")
+            f"контакты {cnt('contacts')}, канал {cnt('channel')}, чат {cnt('chat')}\n"
+            f"Ошибок: {cnt('error')}"
+            + refs_text(since))
+
+
+def refs_text(since: float) -> str:
+    rows = db.execute("SELECT substr(kind, 5), COUNT(*) FROM events WHERE kind LIKE 'ref:%' AND ts>? "
+                      "GROUP BY kind ORDER BY 2 DESC", (since,)).fetchall()
+    return ("\nПо реферальным ссылкам: " + ", ".join(f"{k} — {n}" for k, n in rows)) if rows else ""
 
 
 async def daily_report_loop():
