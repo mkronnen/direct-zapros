@@ -1,14 +1,20 @@
-"""Клиентский бот ПрямойАвтоИмпорт: ИИ-ассистент на Groq + Telegram long polling.
+"""Клиентский бот ПрямойАвтоИмпорт: меню-бот без нейросети + мини-приложение (каталог и подбор).
+
+Что умеет:
+  • /start — приветствие с логотипом и кнопки снизу;
+  • кнопки: «Каталог и подбор» (мини-приложение), «Этапы работы», «Образец договора», «Отзывы», «Контакты»;
+  • заявки из мини-приложения — сразу менеджеру;
+  • любое другое сообщение клиента пересылается менеджеру; если менеджер ответит на него (reply)
+    в чате с ботом — бот отправит ответ клиенту.
 
 Переменные окружения (лежат на сервере в /etc/direct-bot.env, в репозитории их нет):
-  BOT_TOKEN, GROQ_API_KEY, ADMIN_CHAT_ID, DATA_DIR
+  BOT_TOKEN, ADMIN_CHAT_ID, DATA_DIR, [LEADS_CHAT_ID], [APP_URL]
 """
 import asyncio
 import html
 import json
 import logging
 import os
-import re
 import sqlite3
 import time
 import traceback
@@ -18,26 +24,82 @@ from pathlib import Path
 import httpx
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
-GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 ADMIN_CHAT_ID = int(os.environ["ADMIN_CHAT_ID"])
-# куда слать заявки (по умолчанию — Артёму; позже можно поставить id рабочей группы)
+# куда слать заявки (по умолчанию — Артёму)
 LEADS_CHAT_ID = int(os.environ.get("LEADS_CHAT_ID", ADMIN_CHAT_ID))
 DATA_DIR = Path(os.environ.get("DATA_DIR", "./data"))
-MODELS = [m.strip() for m in os.environ.get(
-    "GROQ_MODELS", "openai/gpt-oss-120b,openai/gpt-oss-20b").split(",") if m.strip()]
+APP_URL = os.environ.get("APP_URL", "https://mkronnen.github.io/direct-zapros/app/")
 
 HERE = Path(__file__).parent
 TG = f"https://api.telegram.org/bot{BOT_TOKEN}"
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 TZ = timezone(timedelta(hours=7))           # Красноярск
-HISTORY_LIMIT = 30                          # сообщений истории в контексте
-USER_MSGS_PER_HOUR = 40                     # защита лимитов Groq от флуда
-DEBOUNCE_SEC = 2.0                          # склеиваем несколько сообщений подряд
 DAILY_REPORT_HOUR = 9                       # суточный отчёт в 09:00 по Красноярску
+FORWARDS_PER_HOUR = 30                      # защита от флуда: столько сообщений клиента в час пересылаем
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("bot")
 logging.getLogger("httpx").setLevel(logging.WARNING)  # иначе в журнал попадает URL с токеном бота
+
+# ---------------------------------------------------------------- тексты и кнопки
+
+BTN_APP = "🚗 Каталог и подбор"
+BTN_STEPS = "📋 Этапы работы"
+BTN_CONTRACT = "📄 Образец договора"
+BTN_REVIEWS = "⭐ Отзывы"
+BTN_CONTACTS = "📍 Контакты"
+
+KEYBOARD = {"keyboard": [[{"text": BTN_APP, "web_app": {"url": APP_URL}}],
+                         [{"text": BTN_STEPS}, {"text": BTN_CONTRACT}],
+                         [{"text": BTN_REVIEWS}, {"text": BTN_CONTACTS}]],
+            "resize_keyboard": True, "is_persistent": True}
+
+CHANNEL_URL = "https://t.me/directautoimport"
+
+WELCOME = (
+    "Здравствуйте! Это бот <b>ПрямойАвтоИмпорт</b> — привозим автомобили под заказ из Китая, Кореи и Японии.\n\n"
+    "🚗 <b>Каталог и подбор</b> — машины в наличии с фото и ценой до Уссурийска или заявка на подбор под ваш запрос\n"
+    "📋 <b>Этапы работы</b> — как проходит покупка\n"
+    "📄 <b>Образец договора</b> — наш агентский договор\n"
+    "⭐ <b>Отзывы</b> — что говорят клиенты\n"
+    "📍 <b>Контакты</b> — где мы находимся и как связаться\n\n"
+    f"Подборки и кейсы — в нашем <a href=\"{CHANNEL_URL}\">Telegram-канале</a>.\n\n"
+    "Выбирайте кнопками ниже 👇 или просто напишите вопрос — его получит менеджер."
+)
+
+CONTACTS = (
+    "📍 <b>Офис</b>\n"
+    "г. Красноярск, ул. Ладо Кецховели, 22а, оф. 12-01/2\n"
+    "Работаем с клиентами по всей России — договор подписывается дистанционно.\n\n"
+    "📞 <b>Связаться с нами</b>\n"
+    "Артём Авдеев — <a href=\"tel:+79954315514\">+7 (995) 431-55-14</a>\n"
+    "Антон Долгов — <a href=\"tel:+79135155372\">+7 (913) 515-53-72</a>\n\n"
+    "🌐 Сайт: <a href=\"https://directautoimport.ru\">directautoimport.ru</a>\n"
+    f"✈️ Канал: <a href=\"{CHANNEL_URL}\">@directautoimport</a>"
+)
+
+REVIEWS = "⭐ Отзывы наших клиентов — видео с получения, истории покупок и кейсы:"
+REVIEWS_BUTTONS = {"inline_keyboard": [
+    [{"text": "Отзывы в Telegram", "url": "https://t.me/directautoimport/reviews"}],
+    [{"text": "Мы во ВКонтакте", "url": "https://vk.ru/direct_ai"}],
+    [{"text": "Наш сайт", "url": "https://directautoimport.ru"}],
+]}
+
+FORWARDED_OK = "Спасибо! Передал ваше сообщение менеджеру — он ответит здесь в ближайшее время."
+
+
+def load_steps() -> str:
+    """Текст «Этапы работы» — дословно из answers/process.txt (первая строка-заголовок с # пропускается)."""
+    f = HERE / "answers" / "process.txt"
+    lines = f.read_text(encoding="utf-8").strip().splitlines()
+    if lines and lines[0].startswith("#"):
+        lines = lines[1:]
+    return "\n".join(lines).strip()
+
+
+STEPS = load_steps()
+CONTRACT_FILE = HERE / "files" / "dogovor_obrazec.pdf"
+CONTRACT_NAME = "Образец договора DirectAI (Китай).pdf"
+WELCOME_IMG = HERE / "files" / "welcome.jpg"
 
 # ---------------------------------------------------------------- хранилище
 
@@ -75,12 +137,6 @@ def save_msg(chat_id: int, role: str, content: str) -> None:
     db.commit()
 
 
-def history(chat_id: int) -> list:
-    rows = db.execute("SELECT role, content FROM messages WHERE chat_id=? ORDER BY ts DESC LIMIT ?",
-                      (chat_id, HISTORY_LIMIT)).fetchall()
-    return [{"role": r, "content": c} for r, c in reversed(rows)]
-
-
 def msgs_last_hour(chat_id: int) -> int:
     return db.execute("SELECT COUNT(*) FROM messages WHERE chat_id=? AND role='user' AND ts>?",
                       (chat_id, time.time() - 3600)).fetchone()[0]
@@ -100,8 +156,19 @@ async def tg(method: str, **params):
 
 
 async def send(chat_id: int, text: str, **extra):
+    res = None
     for chunk in [text[i:i + 4000] for i in range(0, len(text), 4000)] or [""]:
-        await tg("sendMessage", chat_id=chat_id, text=chunk, disable_web_page_preview=True, **extra)
+        res = await tg("sendMessage", chat_id=chat_id, text=chunk, disable_web_page_preview=True, **extra)
+    return res
+
+
+async def send_file(method: str, field: str, chat_id: int, path: Path, filename: str, mime: str, **extra):
+    data = {"chat_id": str(chat_id)}
+    for k, v in extra.items():
+        data[k] = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+    r = await http.post(f"{TG}/{method}", data=data, files={field: (filename, path.read_bytes(), mime)})
+    if not r.json().get("ok"):
+        raise RuntimeError(f"{method}: {r.text[:200]}")
 
 
 # ---------------------------------------------------------------- отчёты об ошибках
@@ -138,230 +205,8 @@ class Reporter:
 
 report = Reporter()
 
-# ---------------------------------------------------------------- нейросеть
+# ---------------------------------------------------------------- пользователи
 
-SYSTEM_PROMPT = (HERE / "prompt.md").read_text(encoding="utf-8").replace(
-    "{knowledge}", (HERE / "knowledge.md").read_text(encoding="utf-8"))
-
-TOOLS = [{
-    "type": "function",
-    "function": {
-        "name": "send_lead",
-        "description": "Передать заявку или вопрос клиента менеджеру. type='подбор'/'конкретная машина' — когда "
-                       "известны модель (или класс) И бюджет. type='вопрос менеджеру' — только если клиент сам просит "
-                       "живого человека, хочет оплатить, торговаться или спрашивает про уже идущую сделку. "
-                       "Вопрос «сколько стоит» — НЕ повод вызывать: сначала узнай год и бюджет.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "type": {"type": "string", "enum": ["подбор", "конкретная машина", "вопрос менеджеру"]},
-                "summary": {"type": "string", "description": "Кратко суть запроса для менеджера, 1–3 предложения"},
-                "name": {"type": "string", "description": "Как зовут клиента, если известно"},
-                "car": {"type": "string", "description": "Марка/модель/комплектация или класс авто"},
-                "year_mileage": {"type": "string", "description": "Год и пробег, если обсуждали"},
-                "budget": {"type": "string", "description": "Бюджет, если назван"},
-                "city": {"type": "string", "description": "Город получения"},
-                "contact": {"type": "string", "description": "Телефон или другой контакт, если клиент дал"},
-            },
-            "required": ["type", "summary"],
-        },
-    },
-}]
-
-
-# Готовые ответы Артёма: bot/answers/<имя>.txt. Первая строка — «# когда отправлять», дальше — текст.
-# Текст уходит клиенту дословно, нейросеть его не переписывает.
-ANSWERS = {}
-for f in sorted((HERE / "answers").glob("*.txt")) if (HERE / "answers").exists() else []:
-    lines = f.read_text(encoding="utf-8").strip().splitlines()
-    if lines and lines[0].startswith("#") and len(lines) > 1:
-        ANSWERS[f.stem] = {"when": lines[0].lstrip("# ").strip(), "text": "\n".join(lines[1:]).strip()}
-
-if ANSWERS:
-    TOOLS.append({
-        "type": "function",
-        "function": {
-            "name": "send_prepared_answer",
-            "description": "Отправить клиенту готовый ответ Артёма дословно. ВСЕГДА используй его, если вопрос "
-                           "клиента подходит под тему, вместо того чтобы отвечать своими словами. Темы: " +
-                           "; ".join(f"«{k}» — {v['when']}" for k, v in ANSWERS.items()),
-            "parameters": {"type": "object",
-                           "properties": {"topic": {"type": "string", "enum": list(ANSWERS)}},
-                           "required": ["topic"]},
-        },
-    })
-
-
-CONTRACT_FILE = HERE / "files" / "dogovor_obrazec.pdf"
-CONTRACT_NAME = "Образец договора DirectAI (Китай).pdf"
-if CONTRACT_FILE.exists():
-    TOOLS.append({
-        "type": "function",
-        "function": {
-            "name": "send_contract_sample",
-            "description": "Отправить клиенту файл с образцом агентского договора (Китай). Используй, когда клиент "
-                           "просит договор, хочет посмотреть условия, сроки или гарантии по договору.",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    })
-
-
-async def send_contract(chat_id: int):
-    r = await http.post(f"{TG}/sendDocument",
-                        data={"chat_id": str(chat_id),
-                              "caption": "Образец нашего агентского договора. Цифры и данные заполняются под вас."},
-                        files={"document": (CONTRACT_NAME, CONTRACT_FILE.read_bytes(), "application/pdf")})
-    if not r.json().get("ok"):
-        raise RuntimeError(f"sendDocument: {r.text[:200]}")
-
-
-class LLMError(Exception):
-    pass
-
-
-async def llm(messages: list) -> dict:
-    """Запрос к Groq. При лимите/сбое пробуем следующую модель из списка."""
-    errors = []
-    for model in MODELS:
-        body = {"model": model, "messages": messages, "tools": TOOLS, "tool_choice": "auto",
-                "temperature": 0.5, "max_completion_tokens": 2000}
-        if "gpt-oss" in model:
-            body["reasoning_effort"] = os.environ.get("REASONING_EFFORT", "medium")
-        for attempt in range(3):
-            try:
-                r = await http.post(GROQ_URL, json=body, timeout=60,
-                                    headers={"Authorization": f"Bearer {GROQ_API_KEY}"})
-            except httpx.HTTPError as e:
-                errors.append(f"{model}: сеть: {e!r}")
-                await asyncio.sleep(2)
-                continue
-            if r.status_code == 200:
-                event("llm_ok")
-                return r.json()["choices"][0]["message"]
-            errors.append(f"{model}: HTTP {r.status_code}: {r.text[:250]}")
-            if r.status_code == 400 and "reasoning_effort" in body:
-                body.pop("reasoning_effort")
-                continue
-            if r.status_code == 429:
-                event("rate_limit")
-                try:
-                    wait = float(r.headers.get("retry-after", "5"))
-                except ValueError:
-                    wait = 5
-                if wait <= 25 and attempt < 2:
-                    await asyncio.sleep(wait + 0.5)
-                    continue
-                break  # долго ждать — пробуем следующую модель
-            if r.status_code >= 500 and attempt < 2:
-                await asyncio.sleep(2 * (attempt + 1))
-                continue
-            break  # следующая модель
-    raise LLMError("\n".join(errors[-4:]))
-
-
-MD_RE = re.compile(r"(\*\*|__|^#+\s*|`)", re.M)
-
-
-def clean(text: str) -> str:
-    return MD_RE.sub("", text or "").strip()
-
-
-# ---------------------------------------------------------------- заявки
-
-HUMAN_RE = re.compile(r"менеджер|человек|оператор|живо|позвон|созвон|связат|свяжит|оплат|предоплат|реквизит|"
-                      r"договор|торг|скидк|сделк|отправьте|передайте", re.I)
-
-
-async def do_send_lead(chat_id: int, user: dict, args: dict, last_user_text: str = "") -> str:
-    if args.get("type") == "вопрос менеджеру" and not HUMAN_RE.search(last_user_text):
-        return ("не отправлено: клиент не просил менеджера. Ответь сам; если это вопрос о цене — "
-                "объясни, от чего она зависит, и спроси год и бюджет")
-    if args.get("type") in ("подбор", "конкретная машина") and not (args.get("car") and args.get("budget")):
-        return "не отправлено: для заявки на подбор нужны модель и бюджет — сначала спроси у клиента недостающее"
-    cur = db.execute("INSERT INTO leads (chat_id, type, data, ts) VALUES (?, ?, ?, ?)",
-                     (chat_id, args.get("type", ""), json.dumps(args, ensure_ascii=False), time.time()))
-    db.commit()
-    lead_id = cur.lastrowid
-    event("lead")
-    e = html.escape
-    who = e(user.get("name") or "клиент")
-    link = f'<a href="tg://user?id={chat_id}">{who}</a>'
-    if user.get("username"):
-        link += f" (@{e(user['username'])})"
-    lines = [f"🆕 Заявка №{lead_id} из бота — {e(args.get('type', ''))}", f"Клиент: {link}"]
-    for key, label in [("name", "Имя"), ("car", "Авто"), ("year_mileage", "Год/пробег"), ("budget", "Бюджет"),
-                       ("city", "Город"), ("contact", "Контакт")]:
-        if args.get(key):
-            lines.append(f"{label}: {e(str(args[key]))}")
-    lines.append(f"\n{e(args.get('summary', ''))}")
-    if chat_id == ADMIN_CHAT_ID:
-        lines.insert(0, "🧪 ТЕСТ")
-    await send(LEADS_CHAT_ID, "\n".join(lines), parse_mode="HTML")
-    return f"ok: заявка №{lead_id} передана менеджеру"
-
-
-# ---------------------------------------------------------------- диалог
-
-GREETING = ("Здравствуйте! Я ИИ-ассистент ПрямойАвтоИмпорт — помогаю подобрать и привезти автомобиль "
-            "из Китая, Кореи или Японии.\n\nНапишите, какую машину ищете или что хотите узнать — "
-            "подскажу и при необходимости передам менеджеру.\n\nМашины в наличии и заявка на подбор — "
-            "по кнопке «🚗 Каталог и подбор» внизу.")
-
-# мини-приложение: каталог машин в наличии + заявка на подбор (лежит на GitHub Pages)
-APP_URL = os.environ.get("APP_URL", "https://mkronnen.github.io/direct-zapros/app/")
-KEYBOARD = {"keyboard": [[{"text": "🚗 Каталог и подбор", "web_app": {"url": APP_URL}}]],
-            "resize_keyboard": True, "is_persistent": True}
-
-CONTACT_LABEL = {"tg": "Telegram", "wa": "WhatsApp", "call": "Звонок"}
-
-
-async def on_webapp(chat_id: int, user: dict, raw: str):
-    """Заявка из мини-приложения: сразу менеджеру, без нейросети."""
-    try:
-        d = json.loads(raw)
-    except Exception:
-        await report("мини-приложение прислало не JSON", raw[:500], chat_id)
-        return
-    e = lambda v: html.escape(str(v))
-    kind = "наличие" if d.get("kind") == "car" else "подбор (мини-приложение)"
-    cur = db.execute("INSERT INTO leads (chat_id, type, data, ts) VALUES (?, ?, ?, ?)",
-                     (chat_id, kind, json.dumps(d, ensure_ascii=False), time.time()))
-    db.commit()
-    lead_id = cur.lastrowid
-    event("lead_app")
-    who = e(user.get("name") or "клиент")
-    link = f'<a href="tg://user?id={chat_id}">{who}</a>'
-    if user.get("username"):
-        link += f" (@{e(user['username'])})"
-    title = "🚗 Хочет машину из наличия" if d.get("kind") == "car" else "🔎 Заявка на подбор"
-    lines = [f"{title} — №{lead_id}", f"Клиент в Telegram: {link}", ""]
-    if d.get("kind") == "car":
-        c = d.get("car", {})
-        lines += [f"<b>{e(c.get('title', ''))}</b>", f"Лот: {e(c.get('lot', ''))}"]
-        for k, label in [("trim", "Комплектация"), ("made", "Выпуск"), ("km", "Пробег"), ("price", "Цена в приложении")]:
-            if c.get(k):
-                lines.append(f"{label}: {e(c[k])}")
-    else:
-        for k, label in [("car", "Марка/модель"), ("years", "Годы"), ("km", "Пробег"), ("cond", "Состояние"),
-                         ("colors", "Цвета"), ("budget", "Бюджет"), ("city", "Город доставки"), ("comment", "Комментарий")]:
-            if d.get(k):
-                lines.append(f"{label}: {e(d[k])}")
-    lines += ["", f"Имя: {e(d.get('name', ''))}", f"Телефон: {e(d.get('phone', ''))}",
-              f"Связь: {e(CONTACT_LABEL.get(d.get('contact'), d.get('contact', '')))}"
-              + (f" (@{e(user['username'])})" if d.get("contact") == "tg" and user.get("username") else "")]
-    lines.append(f"Промокод: {e(d['promo'])}" if d.get("promo") else "Промокод: —")
-    if chat_id == ADMIN_CHAT_ID:
-        lines.insert(0, "🧪 ТЕСТ")
-    await send(LEADS_CHAT_ID, "\n".join(lines), parse_mode="HTML")
-    how = {"tg": "здесь, в Telegram", "wa": "в WhatsApp", "call": "по телефону"}.get(d.get("contact"), "")
-    await send(chat_id, f"Заявка №{lead_id} отправлена менеджеру — он свяжется с вами {how} в ближайшее время. "
-                        "Если появятся вопросы, пишите сюда.", reply_markup=KEYBOARD)
-    save_msg(chat_id, "system", f"Служебно: клиент отправил заявку №{lead_id} через мини-приложение "
-                                f"({kind}). Менеджер свяжется. Повторно заявку не отправляй.")
-
-buffers: dict[int, list[str]] = {}
-timers: dict[int, asyncio.Task] = {}
-locks: dict[int, asyncio.Lock] = {}
 users: dict[int, dict] = {}
 
 
@@ -378,125 +223,160 @@ def remember_user(msg: dict) -> dict:
     return info
 
 
-async def reply_with_llm(chat_id: int, user_text: str):
-    save_msg(chat_id, "user", user_text)
-    if msgs_last_hour(chat_id) > USER_MSGS_PER_HOUR:
-        await send(chat_id, "Давайте сделаем небольшую паузу — я передам ваш вопрос менеджеру, он ответит лично.")
-        await report("клиент превысил лимит сообщений", chat_id=chat_id)
-        return
-    await tg("sendChatAction", chat_id=chat_id, action="typing")
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history(chat_id)
-    user = users.get(chat_id, {})
-    sent_template = False
-    for _ in range(3):  # максимум 3 круга вызова инструментов
-        msg = await llm(messages)
-        calls = msg.get("tool_calls") or []
-        if not calls:
-            text = clean(msg.get("content"))
-            if not text:
-                if sent_template:   # готовый ответ уже ушёл — добавлять нечего
-                    return
-                raise LLMError("пустой ответ модели")
-            save_msg(chat_id, "assistant", text)
-            if not kv_get(f"kb:{chat_id}"):   # старым пользователям — один раз показать кнопку приложения
-                await send(chat_id, text, reply_markup=KEYBOARD)
-                kv_set(f"kb:{chat_id}", 1)
-            else:
-                await send(chat_id, text)
-            return
-        messages.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls})
-        for call in calls:
-            name = call["function"]["name"]
-            try:
-                args = json.loads(call["function"].get("arguments") or "{}")
-                if name == "send_lead":
-                    result = await do_send_lead(chat_id, user, args, user_text)
-                    if result.startswith("ok"):
-                        save_msg(chat_id, "system", f"Служебно: {result.split(': ', 1)[1]}. Повторно не отправляй.")
-                elif name == "send_prepared_answer" and args.get("topic") in ANSWERS and not sent_template:
-                    text = ANSWERS[args["topic"]]["text"]
-                    await send(chat_id, text)
-                    save_msg(chat_id, "assistant", text)
-                    event("template")
-                    sent_template = True
-                    result = ("ok: готовый ответ отправлен клиенту. Не пересказывай его. Если клиент спрашивал "
-                              "ещё что-то — ответь коротко; иначе можешь задать один короткий вопрос или "
-                              "вернуть пустой ответ.")
-                elif name == "send_contract_sample" and CONTRACT_FILE.exists():
-                    await send_contract(chat_id)
-                    save_msg(chat_id, "system", "Служебно: образец договора уже отправлен клиенту.")
-                    event("contract")
-                    result = ("ok: файл договора отправлен. Если клиент спрашивал о конкретном условии (сроки и т.п.) "
-                              "— коротко процитируй его из базы знаний.")
-                else:
-                    result = f"нет инструмента {name}"
-            except Exception as e:
-                result = f"ошибка: {e}"
-                await report(f"сбой инструмента {name}", traceback.format_exc(), chat_id)
-            messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
-        if all(c["function"]["name"] in ("send_prepared_answer", "send_contract_sample") for c in calls):
-            names = {c["function"]["name"] for c in calls}
-            # клиент просил договор, а модель про него забыла — отправляем сами
-            if ("send_contract_sample" not in names and CONTRACT_FILE.exists()
-                    and re.search(r"договор", user_text, re.I)):
-                await send_contract(chat_id)
-                save_msg(chat_id, "system", "Служебно: образец договора уже отправлен клиенту.")
-                event("contract")
-            return  # готовые материалы отправлены — лишний запрос к нейросети не тратим
-    if sent_template:
-        return
-    raise LLMError("слишком много вызовов инструментов подряд")
+def user_link(chat_id: int, user: dict) -> str:
+    e = html.escape
+    link = f'<a href="tg://user?id={chat_id}">{e(user.get("name") or "клиент")}</a>'
+    if user.get("username"):
+        link += f" (@{e(user['username'])})"
+    return link
 
 
-async def process(chat_id: int):
-    await asyncio.sleep(DEBOUNCE_SEC)
-    async with locks.setdefault(chat_id, asyncio.Lock()):
-        parts = buffers.pop(chat_id, [])
-        if not parts:
-            return
-        sent_before = db.execute("SELECT COUNT(*) FROM messages WHERE chat_id=? AND role='assistant'",
-                                 (chat_id,)).fetchone()[0]
-        try:
-            await reply_with_llm(chat_id, "\n".join(parts))
-        except LLMError as e:
-            sent_now = db.execute("SELECT COUNT(*) FROM messages WHERE chat_id=? AND role='assistant'",
-                                  (chat_id,)).fetchone()[0]
-            if sent_now > sent_before:   # клиенту уже что-то ушло в этом ходе — не пугаем его сбоем
-                await report("нейросеть не ответила (после отправки материалов)", str(e), chat_id)
-                return
-            await report("нейросеть не ответила", str(e), chat_id)
-            await safe_send(chat_id, "Секунду, у меня технический сбой. Я уже передал ваш вопрос менеджеру — "
-                                     "он ответит в ближайшее время.")
-            await notify_fallback(chat_id, "\n".join(parts))
-        except Exception:
-            await report("сбой обработки сообщения", traceback.format_exc(), chat_id)
-            await safe_send(chat_id, "Извините, что-то пошло не так. Передаю ваш вопрос менеджеру.")
-            await notify_fallback(chat_id, "\n".join(parts))
+# ---------------------------------------------------------------- разделы меню
 
-
-async def safe_send(chat_id, text):
+async def send_welcome(chat_id: int):
     try:
-        await send(chat_id, text)
-    except Exception as e:
-        log.error("safe_send: %s", e)
+        if WELCOME_IMG.exists():
+            await send_file("sendPhoto", "photo", chat_id, WELCOME_IMG, "welcome.jpg", "image/jpeg",
+                            caption=WELCOME, parse_mode="HTML", reply_markup=KEYBOARD)
+            return
+    except Exception:
+        await report("не отправилось фото приветствия", traceback.format_exc(), chat_id)
+    await send(chat_id, WELCOME, parse_mode="HTML", reply_markup=KEYBOARD)
 
 
-async def notify_fallback(chat_id: int, text: str):
-    u = users.get(chat_id, {})
-    who = html.escape(u.get("name") or "клиент")
-    link = f'<a href="tg://user?id={chat_id}">{who}</a>' + (f" (@{html.escape(u['username'])})" if u.get("username") else "")
+async def send_contract(chat_id: int):
+    await send_file("sendDocument", "document", chat_id, CONTRACT_FILE, CONTRACT_NAME, "application/pdf",
+                    caption="Образец нашего агентского договора. Цифры и данные заполняются под вас.",
+                    reply_markup=KEYBOARD)
+
+
+async def on_menu(chat_id: int, text: str) -> bool:
+    """Нажатие кнопки меню. True — если обработали."""
+    if text == BTN_STEPS:
+        await send(chat_id, STEPS, reply_markup=KEYBOARD)
+        event("steps")
+    elif text == BTN_CONTRACT:
+        await send_contract(chat_id)
+        event("contract")
+    elif text == BTN_REVIEWS:
+        await send(chat_id, REVIEWS, reply_markup=REVIEWS_BUTTONS)
+        event("reviews")
+    elif text == BTN_CONTACTS:
+        await send(chat_id, CONTACTS, parse_mode="HTML", reply_markup=KEYBOARD)
+        event("contacts")
+    elif text == BTN_APP:   # нажали кнопку как текст (старый клиент Telegram без мини-приложений)
+        await send(chat_id, "Откройте каталог кнопкой «🚗 Каталог и подбор» внизу экрана. Если она не открывается — "
+                            "обновите Telegram или напишите, какую машину ищете, и менеджер ответит здесь.",
+                   reply_markup=KEYBOARD)
+    else:
+        return False
+    return True
+
+
+# ---------------------------------------------------------------- заявки из мини-приложения
+
+CONTACT_LABEL = {"tg": "Telegram", "wa": "WhatsApp", "call": "Звонок"}
+
+
+async def on_webapp(chat_id: int, user: dict, raw: str):
     try:
-        await send(LEADS_CHAT_ID, f"📩 Бот не смог ответить, ответьте вручную.\nКлиент: {link}\n\n{html.escape(text)}",
-                   parse_mode="HTML")
-    except Exception as e:
-        log.error("fallback notify: %s", e)
+        d = json.loads(raw)
+    except Exception:
+        await report("мини-приложение прислало не JSON", raw[:500], chat_id)
+        return
+    e = lambda v: html.escape(str(v))
+    is_car = d.get("kind") == "car"
+    kind = "наличие" if is_car else "подбор"
+    cur = db.execute("INSERT INTO leads (chat_id, type, data, ts) VALUES (?, ?, ?, ?)",
+                     (chat_id, kind, json.dumps(d, ensure_ascii=False), time.time()))
+    db.commit()
+    lead_id = cur.lastrowid
+    event("lead_app")
+    title = "🚗 Хочет машину из наличия" if is_car else "🔎 Заявка на подбор"
+    lines = [f"{title} — №{lead_id}", f"Клиент в Telegram: {user_link(chat_id, user)}", ""]
+    if is_car:
+        c = d.get("car", {})
+        lines += [f"<b>{e(c.get('title', ''))}</b>", f"Лот: {e(c.get('lot', ''))}"]
+        for k, label in [("trim", "Комплектация"), ("made", "Выпуск"), ("km", "Пробег"), ("price", "Цена в приложении")]:
+            if c.get(k):
+                lines.append(f"{label}: {e(c[k])}")
+    else:
+        for k, label in [("car", "Марка/модель"), ("years", "Годы"), ("km", "Пробег"), ("cond", "Состояние"),
+                         ("colors", "Цвета"), ("budget", "Бюджет"), ("city", "Город доставки")]:
+            if d.get(k):
+                lines.append(f"{label}: {e(d[k])}")
+    lines += ["", f"Имя: {e(d.get('name', ''))}", f"Телефон: {e(d.get('phone', ''))}",
+              f"Связь: {e(CONTACT_LABEL.get(d.get('contact'), d.get('contact', '')))}"
+              + (f" (@{e(user['username'])})" if d.get("contact") == "tg" and user.get("username") else ""),
+              f"Промокод: {e(d['promo'])}" if d.get("promo") else "Промокод: —",
+              "", "↩️ Ответьте на это сообщение — ответ уйдёт клиенту в бот."]
+    if chat_id == ADMIN_CHAT_ID:
+        lines.insert(0, "🧪 ТЕСТ")
+    sent = await send(LEADS_CHAT_ID, "\n".join(lines), parse_mode="HTML")
+    kv_set(f"relay:{LEADS_CHAT_ID}:{sent['message_id']}", chat_id)
+    how = {"tg": "здесь, в Telegram", "wa": "в WhatsApp", "call": "по телефону"}.get(d.get("contact"), "")
+    await send(chat_id, f"Заявка №{lead_id} отправлена менеджеру — он свяжется с вами {how} в ближайшее время. "
+                        "Если появятся вопросы, пишите сюда.", reply_markup=KEYBOARD)
+    save_msg(chat_id, "system", f"заявка №{lead_id} ({kind})")
 
+
+# ---------------------------------------------------------------- сообщения клиентов → менеджеру
+
+async def forward_to_manager(msg: dict, user: dict):
+    chat_id = msg["chat"]["id"]
+    text = msg.get("text") or msg.get("caption") or ""
+    save_msg(chat_id, "user", text or "[вложение]")
+    if msgs_last_hour(chat_id) > FORWARDS_PER_HOUR:
+        return   # флуд — молча не пересылаем
+    head = await send(LEADS_CHAT_ID, f"💬 Сообщение в боте от {user_link(chat_id, user)}"
+                                     + (" — 🧪 ТЕСТ" if chat_id == ADMIN_CHAT_ID else "")
+                                     + "\n↩️ Ответьте на сообщение ниже — ответ уйдёт клиенту.", parse_mode="HTML")
+    kv_set(f"relay:{LEADS_CHAT_ID}:{head['message_id']}", chat_id)
+    fwd = await tg("forwardMessage", chat_id=LEADS_CHAT_ID, from_chat_id=chat_id, message_id=msg["message_id"])
+    kv_set(f"relay:{LEADS_CHAT_ID}:{fwd['message_id']}", chat_id)
+    event("forward")
+    # не отвечаем «передал» на каждое сообщение подряд — максимум раз в 10 минут
+    if time.time() - float(kv_get(f"ack:{chat_id}", 0)) > 600:
+        kv_set(f"ack:{chat_id}", time.time())
+        await send(chat_id, FORWARDED_OK, reply_markup=KEYBOARD)
+
+
+async def relay_reply(msg: dict) -> bool:
+    """Менеджер ответил (reply) на пересланное сообщение — копируем ответ клиенту."""
+    reply = msg.get("reply_to_message")
+    if not reply:
+        return False
+    target = kv_get(f"relay:{msg['chat']['id']}:{reply['message_id']}")
+    if not target:
+        return False
+    target = int(target)
+    try:
+        await tg("copyMessage", chat_id=target, from_chat_id=msg["chat"]["id"], message_id=msg["message_id"])
+        save_msg(target, "manager", msg.get("text") or msg.get("caption") or "[вложение]")
+        event("relay")
+    except Exception as e:
+        await send(msg["chat"]["id"], f"Не удалось отправить клиенту: {e}")
+        return True
+    try:   # 👍 под ответом — значит, ушло клиенту
+        await tg("setMessageReaction", chat_id=msg["chat"]["id"], message_id=msg["message_id"],
+                 reaction=[{"type": "emoji", "emoji": "👍"}])
+    except Exception:
+        await send(msg["chat"]["id"], "✅ Отправлено клиенту")
+    return True
+
+
+# ---------------------------------------------------------------- приём сообщений
 
 async def on_message(msg: dict):
     chat = msg.get("chat", {})
-    if chat.get("type") != "private":
+    if chat.get("type") != "private" and chat.get("id") != LEADS_CHAT_ID:
         return
     chat_id = chat["id"]
+    # ответы менеджера (в личке с ботом или в рабочем чате заявок)
+    if chat_id in (ADMIN_CHAT_ID, LEADS_CHAT_ID) and await relay_reply(msg):
+        return
+    if chat.get("type") != "private":
+        return
     user = remember_user(msg)
     if msg.get("web_app_data"):
         try:
@@ -505,14 +385,11 @@ async def on_message(msg: dict):
             await report("сбой заявки из мини-приложения", traceback.format_exc(), chat_id)
             await safe_send(chat_id, "Не получилось отправить заявку автоматически — я уже сообщил менеджеру, "
                                      "он свяжется с вами.")
-            await notify_fallback(chat_id, msg["web_app_data"].get("data", "")[:3000])
         return
-    text = msg.get("text") or msg.get("caption") or ""
+    text = (msg.get("text") or "").strip()
     if text.startswith("/start"):
-        db.execute("DELETE FROM messages WHERE chat_id=?", (chat_id,))
-        db.commit()
-        await send(chat_id, GREETING, reply_markup=KEYBOARD)
-        kv_set(f"kb:{chat_id}", 1)
+        await send_welcome(chat_id)
+        event("start")
         return
     if text.startswith("/stats") and chat_id == ADMIN_CHAT_ID:
         await send(chat_id, stats_text(24))
@@ -524,14 +401,16 @@ async def on_message(msg: dict):
         out, _ = await proc.communicate()
         await send(chat_id, (out.decode(errors="replace")[-3800:] or "журнал пуст"))
         return
-    if not text:
-        await send(chat_id, "Пока я понимаю только текст. Опишите, пожалуйста, словами — или я передам менеджеру.")
+    if text and await on_menu(chat_id, text):
         return
-    buffers.setdefault(chat_id, []).append(text)
-    t = timers.get(chat_id)
-    if t and not t.done():
-        t.cancel()
-    timers[chat_id] = asyncio.create_task(process(chat_id))
+    await forward_to_manager(msg, user)
+
+
+async def safe_send(chat_id, text):
+    try:
+        await send(chat_id, text)
+    except Exception as e:
+        log.error("safe_send: %s", e)
 
 
 # ---------------------------------------------------------------- отчёты
@@ -539,15 +418,12 @@ async def on_message(msg: dict):
 def stats_text(hours: int) -> str:
     since = time.time() - hours * 3600
     cnt = lambda kind: db.execute("SELECT COUNT(*) FROM events WHERE kind=? AND ts>?", (kind, since)).fetchone()[0]
-    dialogs = db.execute("SELECT COUNT(DISTINCT chat_id) FROM messages WHERE role='user' AND ts>?",
-                         (since,)).fetchone()[0]
-    msgs = db.execute("SELECT COUNT(*) FROM messages WHERE role='user' AND ts>?", (since,)).fetchone()[0]
     return (f"📊 Бот за {hours} ч\n"
-            f"Новых клиентов: {cnt('new_user')}\n"
-            f"Диалогов: {dialogs}, сообщений от клиентов: {msgs}\n"
-            f"Заявок менеджеру: {cnt('lead')}\n"
-            f"Ответов нейросети: {cnt('llm_ok')}, упёрлись в лимит Groq: {cnt('rate_limit')}\n"
-            f"Готовых ответов: {cnt('template')}, договоров отправлено: {cnt('contract')}\n"
+            f"Новых клиентов: {cnt('new_user')}, нажали /start: {cnt('start')}\n"
+            f"Заявок из приложения: {cnt('lead_app')}\n"
+            f"Сообщений переслано вам: {cnt('forward')}, ваших ответов клиентам: {cnt('relay')}\n"
+            f"Открыли: этапы {cnt('steps')}, договор {cnt('contract')}, отзывы {cnt('reviews')}, "
+            f"контакты {cnt('contacts')}\n"
             f"Ошибок: {cnt('error')}")
 
 
@@ -586,6 +462,7 @@ def version() -> str:
 async def main():
     me = await tg("getMe")
     await tg("deleteWebhook", drop_pending_updates=False)
+    await tg("setMyCommands", commands=[{"command": "start", "description": "Главное меню"}])
     await send(ADMIN_CHAT_ID, f"🤖 Бот @{me['username']} запущен, версия {version()}.")
     asyncio.create_task(daily_report_loop())
     offset = int(kv_get("offset", 0))
