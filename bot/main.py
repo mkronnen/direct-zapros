@@ -304,7 +304,60 @@ async def do_send_lead(chat_id: int, user: dict, args: dict, last_user_text: str
 
 GREETING = ("Здравствуйте! Я ИИ-ассистент ПрямойАвтоИмпорт — помогаю подобрать и привезти автомобиль "
             "из Китая, Кореи или Японии.\n\nНапишите, какую машину ищете или что хотите узнать — "
-            "подскажу и при необходимости передам менеджеру.")
+            "подскажу и при необходимости передам менеджеру.\n\nМашины в наличии и заявка на подбор — "
+            "по кнопке «🚗 Каталог и подбор» внизу.")
+
+# мини-приложение: каталог машин в наличии + заявка на подбор (лежит на GitHub Pages)
+APP_URL = os.environ.get("APP_URL", "https://mkronnen.github.io/direct-zapros/app/")
+KEYBOARD = {"keyboard": [[{"text": "🚗 Каталог и подбор", "web_app": {"url": APP_URL}}]],
+            "resize_keyboard": True, "is_persistent": True}
+
+CONTACT_LABEL = {"tg": "Telegram", "wa": "WhatsApp", "call": "Звонок"}
+
+
+async def on_webapp(chat_id: int, user: dict, raw: str):
+    """Заявка из мини-приложения: сразу менеджеру, без нейросети."""
+    try:
+        d = json.loads(raw)
+    except Exception:
+        await report("мини-приложение прислало не JSON", raw[:500], chat_id)
+        return
+    e = lambda v: html.escape(str(v))
+    kind = "наличие" if d.get("kind") == "car" else "подбор (мини-приложение)"
+    cur = db.execute("INSERT INTO leads (chat_id, type, data, ts) VALUES (?, ?, ?, ?)",
+                     (chat_id, kind, json.dumps(d, ensure_ascii=False), time.time()))
+    db.commit()
+    lead_id = cur.lastrowid
+    event("lead_app")
+    who = e(user.get("name") or "клиент")
+    link = f'<a href="tg://user?id={chat_id}">{who}</a>'
+    if user.get("username"):
+        link += f" (@{e(user['username'])})"
+    title = "🚗 Хочет машину из наличия" if d.get("kind") == "car" else "🔎 Заявка на подбор"
+    lines = [f"{title} — №{lead_id}", f"Клиент в Telegram: {link}", ""]
+    if d.get("kind") == "car":
+        c = d.get("car", {})
+        lines += [f"<b>{e(c.get('title', ''))}</b>", f"Лот: {e(c.get('lot', ''))}"]
+        for k, label in [("trim", "Комплектация"), ("made", "Выпуск"), ("km", "Пробег"), ("price", "Цена в приложении")]:
+            if c.get(k):
+                lines.append(f"{label}: {e(c[k])}")
+    else:
+        for k, label in [("car", "Марка/модель"), ("years", "Годы"), ("km", "Пробег"), ("cond", "Состояние"),
+                         ("colors", "Цвета"), ("budget", "Бюджет"), ("city", "Город доставки"), ("comment", "Комментарий")]:
+            if d.get(k):
+                lines.append(f"{label}: {e(d[k])}")
+    lines += ["", f"Имя: {e(d.get('name', ''))}", f"Телефон: {e(d.get('phone', ''))}",
+              f"Связь: {e(CONTACT_LABEL.get(d.get('contact'), d.get('contact', '')))}"
+              + (f" (@{e(user['username'])})" if d.get("contact") == "tg" and user.get("username") else "")]
+    lines.append(f"Промокод: {e(d['promo'])}" if d.get("promo") else "Промокод: —")
+    if chat_id == ADMIN_CHAT_ID:
+        lines.insert(0, "🧪 ТЕСТ")
+    await send(LEADS_CHAT_ID, "\n".join(lines), parse_mode="HTML")
+    how = {"tg": "здесь, в Telegram", "wa": "в WhatsApp", "call": "по телефону"}.get(d.get("contact"), "")
+    await send(chat_id, f"Заявка №{lead_id} отправлена менеджеру — он свяжется с вами {how} в ближайшее время. "
+                        "Если появятся вопросы, пишите сюда.", reply_markup=KEYBOARD)
+    save_msg(chat_id, "system", f"Служебно: клиент отправил заявку №{lead_id} через мини-приложение "
+                                f"({kind}). Менеджер свяжется. Повторно заявку не отправляй.")
 
 buffers: dict[int, list[str]] = {}
 timers: dict[int, asyncio.Task] = {}
@@ -345,7 +398,11 @@ async def reply_with_llm(chat_id: int, user_text: str):
                     return
                 raise LLMError("пустой ответ модели")
             save_msg(chat_id, "assistant", text)
-            await send(chat_id, text)
+            if not kv_get(f"kb:{chat_id}"):   # старым пользователям — один раз показать кнопку приложения
+                await send(chat_id, text, reply_markup=KEYBOARD)
+                kv_set(f"kb:{chat_id}", 1)
+            else:
+                await send(chat_id, text)
             return
         messages.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls})
         for call in calls:
@@ -440,12 +497,22 @@ async def on_message(msg: dict):
     if chat.get("type") != "private":
         return
     chat_id = chat["id"]
-    remember_user(msg)
+    user = remember_user(msg)
+    if msg.get("web_app_data"):
+        try:
+            await on_webapp(chat_id, user, msg["web_app_data"].get("data", ""))
+        except Exception:
+            await report("сбой заявки из мини-приложения", traceback.format_exc(), chat_id)
+            await safe_send(chat_id, "Не получилось отправить заявку автоматически — я уже сообщил менеджеру, "
+                                     "он свяжется с вами.")
+            await notify_fallback(chat_id, msg["web_app_data"].get("data", "")[:3000])
+        return
     text = msg.get("text") or msg.get("caption") or ""
     if text.startswith("/start"):
         db.execute("DELETE FROM messages WHERE chat_id=?", (chat_id,))
         db.commit()
-        await send(chat_id, GREETING)
+        await send(chat_id, GREETING, reply_markup=KEYBOARD)
+        kv_set(f"kb:{chat_id}", 1)
         return
     if text.startswith("/stats") and chat_id == ADMIN_CHAT_ID:
         await send(chat_id, stats_text(24))
