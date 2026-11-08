@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Direct Autoimport</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{
+  --bg: var(--tg-theme-bg-color, #ffffff);
+  --bg2: var(--tg-theme-secondary-bg-color, #f2f3f5);
+  --text: var(--tg-theme-text-color, #15171a);
+  --hint: var(--tg-theme-hint-color, #8a9099);
+  --link: var(--tg-theme-link-color, #2a7de1);
+  --btn: var(--tg-theme-button-color, #2a7de1);
+  --btn-text: var(--tg-theme-button-text-color, #ffffff);
+  --card: var(--tg-theme-section-bg-color, var(--tg-theme-bg-color, #ffffff));
+  --line: color-mix(in srgb, var(--hint) 25%, transparent);
+  --err: #e5484d;
+  --r: 14px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg2);color:var(--text);font:15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+button{font:inherit;color:inherit}
+.view{display:none;min-height:100vh;padding:14px 14px calc(24px + env(safe-area-inset-bottom))}
+.view.on{display:block}
+h1{font-size:22px;margin:4px 0 2px}
+h2{font-size:19px;margin:2px 0 12px}
+.sub{color:var(--hint);margin:0 0 18px}
+.muted{color:var(--hint)}
+
+/* главная */
+.brand{display:flex;align-items:center;gap:10px;margin:6px 0 4px}
+.logo{width:40px;height:40px;border-radius:12px;background:var(--btn);color:var(--btn-text);display:grid;place-items:center;font-weight:800;letter-spacing:-.5px}
+.big{display:block;width:100%;text-align:left;border:0;border-radius:18px;padding:20px 18px;margin:0 0 12px;background:var(--card);cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.big b{display:block;font-size:19px;margin-bottom:4px}
+.big span{color:var(--hint)}
+.big.primary{background:var(--btn);color:var(--btn-text)}
+.big.primary span{color:color-mix(in srgb, var(--btn-text) 80%, transparent)}
+.big .ico{font-size:28px;float:right;line-height:1}
+
+/* каталог */
+.bar{display:flex;gap:8px;margin:0 0 12px;flex-wrap:wrap}
+.bar select,.bar input{flex:1 1 140px;min-width:0;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit}
+.count{color:var(--hint);font-size:13px;margin:-4px 0 10px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.lot{background:var(--card);border-radius:var(--r);overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.06);display:flex;flex-direction:column}
+.ph{position:relative;aspect-ratio:4/3;background:var(--bg2);overflow:hidden}
+.ph img{width:100%;height:100%;object-fit:cover;display:block}
+.ph .none{position:absolute;inset:0;display:grid;place-items:center;color:var(--hint);font-size:13px}
+.thumbs{display:grid;grid-template-columns:repeat(10,1fr);gap:3px;padding:3px}
+.thumbs img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:4px;cursor:pointer;opacity:.75;background:var(--bg2)}
+.thumbs img.on{opacity:1;outline:2px solid var(--btn);outline-offset:-2px}
+.info{padding:10px 12px 12px;display:flex;flex-direction:column;gap:2px;flex:1}
+.ttl{font-weight:700;font-size:17px}
+.row{font-size:14px}
+.row .k{color:var(--hint)}
+.price{font-size:20px;font-weight:800;margin-top:8px}
+.note{font-size:11px;line-height:1.3;color:var(--hint);opacity:.85}
+.btn{display:block;width:100%;border:0;border-radius:12px;padding:12px;margin-top:10px;background:var(--btn);color:var(--btn-text);font-weight:600;cursor:pointer;text-align:center}
+.btn.ghost{background:color-mix(in srgb, var(--btn) 12%, transparent);color:var(--btn)}
+.btn:disabled{opacity:.5}
+
+/* карточка */
+#car .ph{border-radius:var(--r) var(--r) 0 0;aspect-ratio:4/3}
+#car .lot{box-shadow:none}
+.nav{position:absolute;top:50%;transform:translateY(-50%);width:38px;height:38px;border-radius:50%;border:0;background:rgba(0,0,0,.35);color:#fff;font-size:20px;cursor:pointer}
+.nav.l{left:8px}.nav.r{right:8px}
+.idx{position:absolute;right:8px;bottom:8px;background:rgba(0,0,0,.45);color:#fff;font-size:12px;padding:2px 7px;border-radius:10px}
+.extra{margin-top:6px;padding-top:8px;border-top:1px solid var(--line)}
+.tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:8px;background:color-mix(in srgb, var(--btn) 12%, transparent);color:var(--btn);margin-top:6px}
+
+/* формы */
+.card{background:var(--card);border-radius:var(--r);padding:14px;margin-bottom:12px}
+.f{margin:0 0 12px}
+.f:last-child{margin-bottom:0}
+.f label,.lbl{display:block;font-size:13px;color:var(--hint);margin:0 0 5px}
+.f label i,.lbl i{color:var(--err);font-style:normal}
+.f input,.f select,.f textarea{width:100%;padding:11px 12px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:inherit}
+.f textarea{min-height:64px;resize:vertical}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:6px}
+.seg button{border:1px solid var(--line);background:var(--bg);border-radius:12px;padding:10px 6px;cursor:pointer;font-size:14px}
+.seg button.on{background:var(--btn);border-color:var(--btn);color:var(--btn-text)}
+.bad input,.bad .seg button{border-color:var(--err)}
+.hintline{font-size:12px;color:var(--hint);margin-top:5px}
+.carmini{display:flex;gap:10px;align-items:center}
+.carmini img{width:84px;height:63px;object-fit:cover;border-radius:10px;background:var(--bg2)}
+
+/* выбор цветов */
+.dd{position:relative}
+.dd-btn{width:100%;text-align:left;padding:11px 34px 11px 12px;border-radius:12px;border:1px solid var(--line);background:var(--bg);cursor:pointer;min-height:44px}
+.dd-btn:after{content:"▾";position:absolute;right:12px;top:11px;color:var(--hint)}
+.dd-list{display:none;position:absolute;z-index:5;left:0;right:0;top:calc(100% + 4px);background:var(--card);border:1px solid var(--line);border-radius:12px;padding:6px;box-shadow:0 8px 24px rgba(0,0,0,.15);max-height:300px;overflow:auto}
+.dd.open .dd-list{display:block}
+.dd .opt{display:flex;align-items:center;gap:10px;padding:9px 8px;margin:0;border-radius:8px;cursor:pointer;color:var(--text);font-size:15px}
+.opt:active{background:var(--bg2)}
+.dd .opt input{margin:0 0 0 auto;width:18px;height:18px;flex:0 0 auto}
+.dot{display:inline-block;width:18px;height:18px;border-radius:50%;border:1px solid rgba(0,0,0,.18);flex:0 0 auto}
+.dots{display:inline-flex;gap:3px;vertical-align:middle;margin-right:6px}
+.dots .dot{width:12px;height:12px}
+
+.done{text-align:center;padding-top:30vh}
+.done b{font-size:20px;display:block;margin-bottom:6px}
+.empty{text-align:center;color:var(--hint);padding:40px 10px}
+</style>
+</head>
+<body>
+
+<!-- главная -->
+<section class="view on" id="home">
+  <div class="brand"><div class="logo">DA</div><div><h1>Direct Autoimport</h1></div></div>
+  <p class="sub">Автомобили из Китая, Кореи и Японии под ключ</p>
+  <button class="big primary" onclick="go('list')"><span class="ico">🚗</span><b>В наличии</b><span id="homeCount">Машины в Китае, готовые к покупке</span></button>
+  <button class="big" onclick="openSearch()"><span class="ico">🔎</span><b>Подобрать под заказ</b><span>Найдём машину под ваш запрос и бюджет</span></button>
+</section>
+
+<!-- каталог -->
+<section class="view" id="list">
+  <h2>Авто в наличии</h2>
+  <div class="bar">
+    <select id="fBrand" onchange="render()"><option value="">Все марки</option></select>
+    <select id="fSort" onchange="render()">
+      <option value="price">Сначала дешевле</option>
+      <option value="-price">Сначала дороже</option>
+      <option value="-made">Сначала новее</option>
+      <option value="km">Меньше пробег</option>
+    </select>
+  </div>
+  <div class="count" id="count"></div>
+  <div class="grid" id="grid"></div>
+</section>
+
+<!-- карточка машины -->
+<section class="view" id="car"></section>
+
+<!-- форма: купить конкретную машину -->
+<section class="view" id="buy">
+  <h2>Оставить заявку на машину</h2>
+  <div class="card" id="buyCar"></div>
+  <div class="card" id="buyContacts"></div>
+  <button class="btn" onclick="submitBuy()">Отправить заявку</button>
+  <p class="note" style="margin-top:10px">Менеджер свяжется с вами и уточнит детали. Это ни к чему не обязывает.</p>
+</section>
+
+<!-- форма: подбор -->
+<section class="view" id="search">
+  <h2>Заявка на подбор</h2>
+  <div class="card">
+    <div class="f"><label>Марка и модель</label><input id="sCar" placeholder="Например, VW Tiguan или «кроссовер до 2 млн»"></div>
+    <div class="f"><span class="lbl">Годы выпуска</span>
+      <div class="two"><select id="sYearFrom"></select><select id="sYearTo"></select></div></div>
+    <div class="f"><label>Пробег</label>
+      <select id="sKm"><option value="">Не важно</option><option>до 30 000 км</option><option>до 50 000 км</option><option>до 70 000 км</option><option>до 100 000 км</option></select></div>
+    <div class="f"><span class="lbl">Состояние</span>
+      <div class="seg" data-name="cond"><button type="button" data-v="Без окрасов">Без окрасов</button><button type="button" data-v="Допустимы окрасы">Допустимы окрасы</button></div></div>
+    <div class="f"><span class="lbl">Цвета</span>
+      <div class="dd" id="colorDD">
+        <button type="button" class="dd-btn" id="colorBtn" onclick="toggleDD(event)">Любой</button>
+        <div class="dd-list" id="colorList"></div>
+      </div>
+      <input id="sColorOther" placeholder="Какой цвет?" style="display:none;margin-top:8px;width:100%;padding:11px 12px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:inherit">
+    </div>
+    <div class="f"><label>Бюджет</label><input id="sBudget" inputmode="numeric" placeholder="Например, 2 500 000 ₽"></div>
+    <div class="f"><label>Город доставки</label><input id="sCity" placeholder="Например, Москва"></div>
+  </div>
+  <div class="card" id="searchContacts"></div>
+  <button class="btn" onclick="submitSearch()">Отправить заявку</button>
+  <p class="note" style="margin-top:10px">Менеджер свяжется с вами и уточнит детали. Это ни к чему не обязывает.</p>
+</section>
+
+<!-- готово -->
+<section class="view" id="done"><div class="done"><b>Заявка отправлена</b><span class="muted">Менеджер скоро свяжется с вами</span></div></section>
+
+<script>
+// ===== настройки =====
+const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQwOaGZlOwyIaH7SphCWmWXkNC1decOw_dpAZcrWMlW8Qqn1L05CPuX2FSN7KvX9rej2Sc7W9Lb1mZi/pub?gid=2075215146&single=true&output=csv";
+const IMG_HOST = "https://heyuncar.bebestweb.com/";
+
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt = n => Math.round(n).toLocaleString("ru-RU").replace(/,/g, " ");
+
+let CARS = [], META = {cny: "", date: ""}, current = null, stack = ["home"];
+
+// ===== навигация =====
+function show(id){
+  document.querySelectorAll(".view").forEach(v => v.classList.toggle("on", v.id === id));
+  window.scrollTo(0, 0);
+  if (tg && tg.BackButton) { stack.length > 1 ? tg.BackButton.show() : tg.BackButton.hide(); }
+}
+function go(id){ stack.push(id); show(id); }
+function back(){ if (stack.length > 1) { stack.pop(); show(stack[stack.length - 1]); } }
+if (tg && tg.BackButton) tg.BackButton.onClick(back);
+
+// ===== данные =====
+function parseCSV(t){
+  const rows = []; let row = [], f = "", q = false;
+  for (let i = 0; i < t.length; i++){
+    const c = t[i];
+    if (q){ if (c === '"'){ if (t[i+1] === '"'){ f += '"'; i++; } else q = false; } else f += c; }
+    else if (c === '"') q = true;
+    else if (c === ","){ row.push(f); f = ""; }
+    else if (c === "\n" || c === "\r"){ if (c === "\r" && t[i+1] === "\n") i++; row.push(f); rows.push(row); row = []; f = ""; }
+    else f += c;
+  }
+  if (f !== "" || row.length){ row.push(f); rows.push(row); }
+  return rows;
+}
+const num = s => { const v = parseFloat(String(s || "").replace(/\s| /g, "").replace(",", ".")); return isNaN(v) ? 0 : v; };
+function photoList(s){
+  if (!s) return [];
+  let list;
+  if (s.includes(":")) { const [pre, ids] = s.split(":"); list = ids.split(",").map(id => pre + "/" + id); }
+  else list = s.split(",");
+  return list.filter(Boolean).map(p => IMG_HOST + p.trim() + ".jpg");
+}
+const img = (u, w) => u + "?x-oss-process=image/resize,w_" + w;
+
+async function load(){
+  try {
+    const r = await fetch(CSV_URL + (CSV_URL.includes("?") ? "&" : "?") + "t=" + Date.now());
+    const rows = parseCSV(await r.text());
+    const h = rows.shift().map(x => x.trim());
+    CARS = rows.filter(r => r[0]).map(r => { const o = {}; h.forEach((k, i) => o[k] = (r[i] || "").trim()); return o; })
+      .map(o => ({...o, priceN: num(o.price), kmN: num(o.km), hpN: num(o.hp), ph: photoList(o.photos),
+                  madeN: (o.made || "").split(".").reverse().join("")}));
+    const first = rows[0] || [];
+    META.cny = (first[h.indexOf("cny")] || "").replace(/(,\d\d)\d+$/, "$1");
+    META.date = first[h.indexOf("date")] || "";
+    const brands = [...new Set(CARS.map(c => c.brand))].sort();
+    $("fBrand").innerHTML = '<option value="">Все марки</option>' + brands.map(b => `<option>${esc(b)}</option>`).join("");
+    const priced = CARS.filter(c => c.priceN);
+    $("homeCount").textContent = CARS.length + " " + plural(CARS.length, "машина", "машины", "машин") +
+      (priced.length ? " · от " + fmt(Math.min(...priced.map(c => c.priceN))) + " ₽" : "");
+    render();
+  } catch (e) {
+    $("grid").innerHTML = '<div class="empty">Не удалось загрузить каталог. Попробуйте открыть позже.</div>';
+  }
+}
+function plural(n, a, b, c){ n %= 100; if (n > 10 && n < 20) return c; n %= 10; return n === 1 ? a : n >= 2 && n <= 4 ? b : c; }
+
+// ===== каталог =====
+function specLine(c){
+  const parts = [];
+  if (c.type === "Электро") parts.push("электро");
+  else if (c.eng) parts.push(c.eng);
+  if (c.hpN) parts.push(c.hpN + " л.с.");
+  if (c.gb) parts.push(c.gb);
+  return parts.join(" · ");
+}
+function priceBlock(c){
+  if (!c.priceN) return `<div class="price">Цена по запросу</div><div class="note">Рассчитаем стоимость под ключ для этой машины — оставьте заявку.</div>`;
+  return `<div class="price">≈ ${fmt(c.priceN)} ₽*</div>
+    <div class="note">*Цена до Уссурийска с учётом комиссии ВТБ, по курсу юаня ЦБ${META.date ? " на " + esc(META.date) : ""}${META.cny ? " (" + esc(META.cny) + " ₽)" : ""}.</div>
+    <div class="note">Расчёт ориентировочный, за точным расчётом обратитесь к менеджеру.</div>`;
+}
+function photoBox(c, i, big){
+  if (!c.ph.length) return `<div class="ph"><div class="none">Фото скоро появятся</div></div>`;
+  return `<div class="ph"><img src="${img(c.ph[i], big ? 1000 : 600)}" alt="" loading="lazy">
+    ${big && c.ph.length > 1 ? `<button class="nav l" onclick="step(-1)">‹</button><button class="nav r" onclick="step(1)">›</button><span class="idx">${i + 1} / ${c.ph.length}</span>` : ""}</div>
+    <div class="thumbs">${c.ph.map((u, k) => `<img src="${img(u, 120)}" class="${k === i ? "on" : ""}" loading="lazy" onclick="${big ? `pick(${k})` : `thumb(this,${k})`}">`).join("")}</div>`;
+}
+function tile(c, idx){
+  return `<div class="lot" data-i="${idx}">${photoBox(c, 0, false)}
+    <div class="info">
+      <div class="ttl">${esc(c.brand)} ${esc(c.model)}</div>
+      <div class="row">${esc(c.trim)}</div>
+      <div class="row"><span class="k">Выпуск:</span> ${esc(c.made)}</div>
+      <div class="row">${esc(specLine(c))}</div>
+      <div class="row"><span class="k">Пробег:</span> ${fmt(c.kmN)} км</div>
+      <div class="row"><span class="k">Состояние:</span> ${esc(c.cond)}</div>
+      ${priceBlock(c)}
+      <div style="flex:1"></div>
+      <button class="btn ghost" onclick="openCar(${idx})">Подробнее</button>
+    </div></div>`;
+}
+let VIEW = [];
+function render(){
+  const b = $("fBrand").value, s = $("fSort").value;
+  VIEW = CARS.filter(c => !b || c.brand === b);
+  const key = s.replace("-", ""), dir = s[0] === "-" ? -1 : 1;
+  VIEW.sort((x, y) => {
+    if (key === "price") { if (!x.priceN) return 1; if (!y.priceN) return -1; return (x.priceN - y.priceN) * dir; }
+    if (key === "made") return x.madeN.localeCompare(y.madeN) * dir;
+    return (x.kmN - y.kmN) * dir;
+  });
+  $("count").textContent = VIEW.length + " " + plural(VIEW.length, "машина", "машины", "машин");
+  $("grid").innerHTML = VIEW.length ? VIEW.map((c, i) => tile(c, i)).join("") : '<div class="empty">Ничего не найдено</div>';
+}
+function thumb(el, k){
+  const lot = el.closest(".lot"), c = VIEW[+lot.dataset.i];
+  lot.querySelector(".ph img").src = img(c.ph[k], 600);
+  lot.querySelectorAll(".thumbs img").forEach((t, j) => t.classList.toggle("on", j === k));
+}
+
+// ===== карточка =====
+let photoI = 0;
+function openCar(idx){ current = VIEW[idx]; photoI = 0; drawCar(); go("car"); }
+function drawCar(){
+  const c = current;
+  $("car").innerHTML = `<div class="lot">${photoBox(c, photoI, true)}
+    <div class="info">
+      <div class="ttl" style="font-size:20px">${esc(c.brand)} ${esc(c.model)}</div>
+      <div class="row">${esc(c.trim)}</div>
+      <div class="row"><span class="k">Выпуск:</span> ${esc(c.made)}</div>
+      <div class="row">${esc(specLine(c))}</div>
+      <div class="row"><span class="k">Пробег:</span> ${fmt(c.kmN)} км</div>
+      <div class="row"><span class="k">Состояние:</span> ${esc(c.cond)}</div>
+      <div class="extra">
+        <div class="row"><span class="k">Цвет кузова / салона:</span> ${esc(c.color)}</div>
+        <div class="row"><span class="k">Привод:</span> ${esc(c.drive || "—")}</div>
+        ${c.from ? `<span class="tag">Растаможка возможна с ${esc(c.from)}</span>` : ""}
+      </div>
+      ${priceBlock(c)}
+      <button class="btn" onclick="openBuy()">Хочу эту машину</button>
+    </div></div>`;
+}
+function step(d){ const n = current.ph.length; photoI = (photoI + d + n) % n; drawCar(); }
+function pick(k){ photoI = k; drawCar(); }
+let sx = null;
+$("car").addEventListener("touchstart", e => { if (e.target.closest(".ph")) sx = e.touches[0].clientX; }, {passive: true});
+$("car").addEventListener("touchend", e => { if (sx === null) return; const dx = e.changedTouches[0].clientX - sx; sx = null; if (Math.abs(dx) > 40 && current.ph.length > 1) step(dx < 0 ? 1 : -1); });
+
+// ===== контакты (общий блок для обеих форм) =====
+const tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+function contactsHTML(p){
+  return `<div class="f" id="${p}NameF"><label>Как к вам обращаться <i>*</i></label><input id="${p}Name" autocomplete="given-name" value="${esc(tgUser ? tgUser.first_name || "" : "")}"></div>
+    <div class="f" id="${p}PhoneF"><label>Номер телефона <i>*</i></label><input id="${p}Phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+7 ___ ___-__-__"></div>
+    <div class="f" id="${p}ContactF"><span class="lbl">Как удобнее связаться <i>*</i></span>
+      <div class="seg" data-name="${p}contact"><button type="button" data-v="tg">Telegram</button><button type="button" data-v="wa">WhatsApp</button><button type="button" data-v="call">Звонок</button></div>
+      <div class="hintline" id="${p}TgHint" style="display:none">Напишем вам здесь, в Telegram${tgUser && tgUser.username ? " — @" + esc(tgUser.username) : ""}</div></div>
+    <div class="f"><label>Промокод</label><input id="${p}Promo" placeholder="Если есть" autocapitalize="characters"></div>`;
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest(".seg button"); if (!b) return;
+  const seg = b.parentElement;
+  seg.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
+  seg.dataset.value = b.dataset.v;
+  seg.closest(".f") && seg.closest(".f").classList.remove("bad");
+  const n = seg.dataset.name;
+  if (n && n.endsWith("contact")) { const p = n.replace("contact", ""); $(p + "TgHint").style.display = b.dataset.v === "tg" ? "block" : "none"; }
+  if (tg && tg.HapticFeedback) tg.HapticFeedback.selectionChanged();
+});
+const segVal = name => (document.querySelector(`.seg[data-name="${name}"]`) || {}).dataset?.value || "";
+function readContacts(p){
+  const d = {name: $(p + "Name").value.trim(), phone: $(p + "Phone").value.trim(), contact: segVal(p + "contact"), promo: $(p + "Promo").value.trim()};
+  let ok = true;
+  [["Name", d.name], ["Phone", d.phone.replace(/\D/g, "").length >= 10 ? d.phone : ""], ["Contact", d.contact]].forEach(([k, v]) => {
+    $(p + k + "F").classList.toggle("bad", !v); if (!v) ok = false; });
+  if (!ok) { if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("error");
+    const bad = document.querySelector(".view.on .bad"); bad && bad.scrollIntoView({behavior: "smooth", block: "center"}); }
+  return ok ? d : null;
+}
+document.addEventListener("input", e => { const f = e.target.closest(".f.bad"); f && f.classList.remove("bad"); });
+
+// ===== покупка машины из каталога =====
+function openBuy(){
+  const c = current;
+  $("buyCar").innerHTML = `<div class="carmini">${c.ph[0] ? `<img src="${img(c.ph[0], 200)}">` : ""}<div>
+    <b>${esc(c.brand)} ${esc(c.model)}</b><div class="muted" style="font-size:13px">${esc(c.made)} · ${fmt(c.kmN)} км${c.priceN ? " · ≈ " + fmt(c.priceN) + " ₽" : ""}</div></div></div>`;
+  $("buyContacts").innerHTML = contactsHTML("b");
+  go("buy");
+}
+function submitBuy(){
+  const d = readContacts("b"); if (!d) return;
+  const c = current;
+  send({kind: "car", ...d, car: {lot: c.lot, title: `${c.brand} ${c.model}`, trim: c.trim, made: c.made,
+        km: fmt(c.kmN) + " км", price: c.priceN ? "≈ " + fmt(c.priceN) + " ₽" : "по запросу"}});
+}
+
+// ===== подбор =====
+const COLORS = [["Белый","#ffffff"],["Черный","#111111"],["Серый","#8e9399"],["Серебристый","linear-gradient(135deg,#f4f5f7,#aab0b8)"],
+  ["Синий","#2457c5"],["Красный","#d0312d"],["Зеленый","#2f8f4e"],["Коричневый / бежевый","#a07850"],["Желтый / оранжевый","#f2a516"],
+  ["Другой","conic-gradient(#e53935,#fdd835,#43a047,#1e88e5,#8e24aa,#e53935)"]];
+function openSearch(){
+  const y = new Date().getFullYear(), opts = a => a.map(v => `<option value="${v}">${v}</option>`).join("");
+  const years = []; for (let i = y; i >= y - 12; i--) years.push(i);
+  $("sYearFrom").innerHTML = '<option value="">Год от</option>' + opts(years);
+  $("sYearTo").innerHTML = '<option value="">Год до</option>' + opts(years);
+  $("colorList").innerHTML = COLORS.map(([n, c]) => `<label class="opt"><span class="dot" style="background:${c}"></span>${n}<input type="checkbox" value="${n}" onchange="colorsChanged()"></label>`).join("");
+  $("searchContacts").innerHTML = contactsHTML("s");
+  go("search");
+}
+function toggleDD(e){ e.stopPropagation(); $("colorDD").classList.toggle("open"); }
+document.addEventListener("click", e => { if (!e.target.closest("#colorDD")) $("colorDD").classList.remove("open"); });
+function colorsChanged(){
+  const sel = [...document.querySelectorAll("#colorList input:checked")].map(i => i.value);
+  const dots = sel.map(n => `<span class="dot" style="background:${COLORS.find(c => c[0] === n)[1]}"></span>`).join("");
+  $("colorBtn").innerHTML = sel.length ? `<span class="dots">${dots}</span>${esc(sel.join(", "))}` : "Любой";
+  $("sColorOther").style.display = sel.includes("Другой") ? "block" : "none";
+}
+$("sBudget").addEventListener("input", e => { const d = e.target.value.replace(/\D/g, ""); e.target.value = d ? fmt(+d) + " ₽" : ""; });
+function submitSearch(){
+  const d = readContacts("s"); if (!d) return;
+  const yf = $("sYearFrom").value, yt = $("sYearTo").value;
+  let colors = [...document.querySelectorAll("#colorList input:checked")].map(i => i.value);
+  const other = $("sColorOther").value.trim();
+  colors = colors.map(c => c === "Другой" ? (other ? "другой: " + other : "другой") : c);
+  send({kind: "search", ...d, car: $("sCar").value.trim(),
+        years: yf || yt ? (yf ? "от " + yf : "") + (yf && yt ? " " : "") + (yt ? "до " + yt : "") : "",
+        km: $("sKm").value, cond: segVal("cond"), colors: colors.join(", "),
+        budget: $("sBudget").value.trim(), city: $("sCity").value.trim()});
+}
+
+// ===== отправка =====
+function send(payload){
+  const data = JSON.stringify(payload);
+  try {
+    if (!tg || !tg.sendData) throw new Error("no tg");
+    tg.sendData(data);           // приложение закроется, заявка придёт боту
+    show("done");
+  } catch (e) {
+    alertMsg("Откройте приложение кнопкой «🚗 Каталог и подбор» в чате с ботом — тогда заявка отправится.");
+  }
+}
+function alertMsg(t){ if (tg && tg.showAlert) tg.showAlert(t); else alert(t); }
+
+load();
+</script>
+</body>
+</html>
