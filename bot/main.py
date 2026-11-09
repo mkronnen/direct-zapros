@@ -24,6 +24,8 @@ from pathlib import Path
 
 import httpx
 
+import sync
+
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 ADMIN_CHAT_ID = int(os.environ["ADMIN_CHAT_ID"])
 # куда слать заявки (по умолчанию — Артёму)
@@ -185,6 +187,133 @@ async def send_file(method: str, field: str, chat_id: int, path: Path, filename:
     r = await http.post(f"{TG}/{method}", data=data, files={field: (filename, path.read_bytes(), mime)})
     if not r.json().get("ok"):
         raise RuntimeError(f"{method}: {r.text[:200]}")
+
+
+# ---------------------------------------------------------------- обновление наличия из Excel
+
+SYNC_PENDING: dict[int, dict] = {}
+
+
+async def sheet_call(payload: dict) -> dict:
+    payload = dict(payload, key=sync.sheet_key(BOT_TOKEN))
+    r = await http.post(sync.APPS_URL, json=payload, timeout=httpx.Timeout(120.0, connect=15.0), follow_redirects=True)
+    try:
+        data = r.json()
+    except Exception:
+        raise RuntimeError(f"таблица ответила не JSON (код {r.status_code}): {r.text[:300]}")
+    if data.get("error"):
+        raise RuntimeError("таблица: " + data["error"])
+    return data
+
+
+async def sync_start(chat_id: int, doc: dict):
+    e = html.escape
+    status = await send(chat_id, "📥 Получил файл, разбираю…")
+    edit = lambda t, **kw: tg("editMessageText", chat_id=chat_id, message_id=status["message_id"], text=t,
+                              parse_mode="HTML", disable_web_page_preview=True, **kw)
+    try:
+        f = await tg("getFile", file_id=doc["file_id"])
+        raw = (await http.get(f"https://api.telegram.org/file/bot{BOT_TOKEN}/{f['file_path']}")).content
+        rows = sync.parse_excel(raw, doc.get("file_name", "x.xlsx"))
+        if not rows:
+            await edit("Не нашёл в файле ни одной машины. Это тот же формат, что присылают китайцы (ссылка на сайт в первой колонке)?")
+            return
+        await edit(f"📥 В файле {len(rows)} машин. Сверяю с таблицей и проверяю сайт…")
+        diff = await sheet_call({"action": "diff", "lots": [r["lot"] for r in rows]})
+        fresh = set(sync.norm(l) for l in diff["fresh"])
+        # проверяем все страницы: новые — забираем данные, у остальных — что машина ещё продаётся
+        sem = asyncio.Semaphore(6)
+        site: dict[str, dict | None] = {}
+        async with httpx.AsyncClient(headers={"User-Agent": "Mozilla/5.0"}) as client:
+            async def one(r):
+                async with sem:
+                    try:
+                        site[r["lot"]] = await sync.fetch_page(client, r["url"])
+                    except Exception:
+                        site[r["lot"]] = "error"
+            await asyncio.gather(*(one(r) for r in rows))
+        errors = [r for r in rows if site.get(r["lot"]) == "error"]
+        if len(errors) > len(rows) // 2:
+            await edit("⚠️ Сайт avtomirhrb.ru не отвечает с сервера — обновление отменил, таблица не тронута. Попробуйте позже.")
+            return
+        sold = [r for r in rows if site.get(r["lot"]) is None]          # страница 404 — машина продана
+        out, added, broken = [], [], []
+        for r in rows:
+            s = site.get(r["lot"])
+            if s is None:
+                continue
+            if sync.norm(r["lot"]) in fresh:
+                if s == "error":
+                    broken.append(r)
+                    continue
+                x = sync.enrich(r, s)
+                out.append(x)
+                added.append(x)
+            else:
+                out.append(r)
+        hide = [m["lot"] for m in diff["missing"]] + [r["lot"] for r in sold]
+        SYNC_PENDING[chat_id] = {"rows": out, "hide": hide}
+        lines = [f"📊 <b>Файл {e(doc.get('file_name', ''))}</b>: {len(rows)} машин", "",
+                 f"♻️ Обновятся цена, пробег, состояние, тест: {len(out) - len(added)}"]
+        if added:
+            lines.append(f"🆕 Новых: {len(added)}")
+            lines += [f"   • {e(x['brand'])} {e(x['model'])} {e(x['trim'])} — {x['price']:,} ¥".replace(",", " ") for x in added[:15]]
+            if len(added) > 15:
+                lines.append(f"   …и ещё {len(added) - 15}")
+        if hide:
+            lines.append(f"🙈 Скрою (нет в файле или страница на сайте удалена): {len(hide)}")
+            names = {m["lot"]: m["title"] for m in diff["missing"]}
+            names.update({r["lot"]: f"{r['brand']} {r['model']}" for r in sold})
+            lines += [f"   • {e(names.get(l, ''))} (лот {e(l)})" for l in hide[:15]]
+            if len(hide) > 15:
+                lines.append(f"   …и ещё {len(hide) - 15}")
+        if broken:
+            lines.append(f"⚠️ Не открылись страницы {len(broken)} новых машин — их пропущу: "
+                         + ", ".join(e(r["lot"]) for r in broken[:10]))
+        sold_n = {sync.norm(r["lot"]) for r in sold}
+        manual = [l for l in diff.get("manualHidden", []) if sync.norm(l) not in sold_n]
+        if manual:
+            lines.append(f"✋ Есть в файле, но скрыты вручную — не трогаю: {', '.join(e(str(l)) for l in manual[:10])}")
+        if added:
+            lines.append("\nФото у новых машин — по стандартной схеме дилера (кузов, торпедо, сиденья). Проверьте карточки после обновления.")
+        warn = len(hide) > max(10, len(rows) // 4)
+        if warn:
+            lines.append("\n⚠️ Скрыть нужно много машин — проверьте, что это полный файл наличия.")
+        lines.append("\nПрименить?")
+        await edit("\n".join(lines), reply_markup={"inline_keyboard": [[
+            {"text": "✅ Применить", "callback_data": "sync:apply"}, {"text": "✖️ Отмена", "callback_data": "sync:cancel"}]]})
+    except Exception:
+        await report("сбой обновления наличия", traceback.format_exc(), chat_id)
+        await edit("⚠️ Не получилось обработать файл — ошибку уже прислал. Таблица не тронута.")
+
+
+async def on_callback(cq: dict):
+    data = cq.get("data", "")
+    chat_id = cq.get("message", {}).get("chat", {}).get("id")
+    mid = cq.get("message", {}).get("message_id")
+    await tg("answerCallbackQuery", callback_query_id=cq["id"])
+    if not data.startswith("sync:") or chat_id != ADMIN_CHAT_ID:
+        return
+    job = SYNC_PENDING.pop(chat_id, None)
+    if data == "sync:cancel" or not job:
+        await tg("editMessageReplyMarkup", chat_id=chat_id, message_id=mid, reply_markup={"inline_keyboard": []})
+        await send(chat_id, "Отменено, таблица не тронута." if job or data == "sync:cancel" else "Эта сводка устарела — пришлите файл ещё раз.")
+        return
+    await tg("editMessageReplyMarkup", chat_id=chat_id, message_id=mid, reply_markup={"inline_keyboard": []})
+    try:
+        res = await sheet_call({"action": "apply", "rows": job["rows"], "hide": job["hide"]})
+    except Exception:
+        await report("сбой записи в таблицу", traceback.format_exc(), chat_id)
+        await send(chat_id, "⚠️ Не удалось записать в таблицу — ошибку прислал выше.")
+        return
+    text = (f"✅ Таблица обновлена: обновлено {res.get('updated', 0)}, добавлено {res.get('added', 0)}, "
+            f"скрыто {res.get('hidden', 0)}" + (f", снова показано {res['unhidden']}" if res.get("unhidden") else "") + ".\n"
+            "Каталог в приложении обновится в течение 5–10 минут.")
+    if res.get("newModels"):
+        text += ("\n\n❓ Новые модели без кузова: " + ", ".join(res["newModels"]) +
+                 ". Впишите их во вкладку «Модели» (кузов и происхождение), иначе они не попадут в подборки.")
+    await send(chat_id, text)
+    event("sync")
 
 
 # ---------------------------------------------------------------- отчёты об ошибках
@@ -435,6 +564,10 @@ async def on_message(msg: dict):
         return
     if chat.get("type") != "private":
         return
+    doc = msg.get("document")
+    if doc and chat_id == ADMIN_CHAT_ID and re.search(r"\.xlsx?$", doc.get("file_name", ""), re.I):
+        asyncio.create_task(sync_start(chat_id, doc))
+        return
     user = remember_user(msg)
     if msg.get("web_app_data"):
         try:
@@ -539,13 +672,19 @@ async def main():
     me = await tg("getMe")
     await tg("deleteWebhook", drop_pending_updates=False)
     await tg("setMyCommands", commands=[{"command": "start", "description": "Главное меню"}])
-    await send(ADMIN_CHAT_ID, f"🤖 Бот @{me['username']} запущен, версия {version()}.")
+    sheet = ""
+    try:   # проверка связи с таблицей (первый запрос заодно закрепляет ключ доступа)
+        res = await sheet_call({"action": "ping"})
+        sheet = f" Таблица на связи: {res.get('cars', '?')} машин."
+    except Exception as e:
+        sheet = f" ⚠️ Таблица не отвечает: {str(e)[:200]}"
+    await send(ADMIN_CHAT_ID, f"🤖 Бот @{me['username']} запущен, версия {version()}.{sheet}")
     asyncio.create_task(daily_report_loop())
     offset = int(kv_get("offset", 0))
     fails = 0
     while True:
         try:
-            updates = await tg("getUpdates", offset=offset, timeout=50, allowed_updates=["message"])
+            updates = await tg("getUpdates", offset=offset, timeout=50, allowed_updates=["message", "callback_query"])
             fails = 0
         except Exception as e:
             fails += 1
@@ -557,6 +696,11 @@ async def main():
         for u in updates:
             offset = u["update_id"] + 1
             kv_set("offset", offset)
+            if "callback_query" in u:
+                try:
+                    await on_callback(u["callback_query"])
+                except Exception:
+                    await report("сбой обработки кнопки", traceback.format_exc())
             if "message" in u:
                 try:
                     await on_message(u["message"])
