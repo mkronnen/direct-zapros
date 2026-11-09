@@ -30,7 +30,10 @@ h2{font-size:21px;margin:2px 0 12px;letter-spacing:.2px}
 .logoimg{display:block;width:min(78%,360px);margin:18px auto 8px;filter:drop-shadow(0 6px 22px rgba(0,160,230,.25))}
 .tagline{text-align:center;color:var(--hint);margin:0 0 22px;font-size:14px;letter-spacing:.3px}
 .big{position:relative;display:block;width:100%;text-align:left;border:0;border-radius:22px;padding:22px 20px;margin:0 0 14px;background:linear-gradient(160deg,var(--card2),var(--card));cursor:pointer;box-shadow:var(--shadow);overflow:hidden;transition:transform .15s ease;animation:up .45s both}
-.big:active{transform:scale(.98)}
+.big{transition:transform .15s ease,box-shadow .25s ease,border-color .25s ease}
+.big:hover,.big:focus-visible{box-shadow:0 0 0 1px rgba(76,198,255,.75),0 0 26px 2px rgba(0,160,230,.55),0 0 60px -6px rgba(0,160,230,.45),var(--shadow);transform:translateY(-1px)}
+.big:active{transform:scale(.98);box-shadow:0 0 0 1px rgba(76,198,255,.9),0 0 32px 4px rgba(0,160,230,.65),var(--shadow)}
+.btn:hover{filter:brightness(1.08);box-shadow:0 0 22px rgba(0,160,230,.6)}
 .big b{display:block;font-size:21px;margin-bottom:4px;position:relative}
 .big span{color:var(--hint);position:relative}
 .big .ico{position:absolute;right:18px;top:18px;font-size:26px;opacity:.9}
@@ -76,6 +79,7 @@ option{background:var(--card);color:var(--text)}
 .trim{color:var(--hint);font-size:13.5px;margin-bottom:4px}
 .specs{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}
 .chip{font-size:12.5px;padding:4px 9px;border-radius:9px;background:rgba(255,255,255,.06);border:1px solid var(--line)}
+.chip.awd{background:rgba(0,160,230,.18);border-color:rgba(0,160,230,.5);color:var(--accent2);font-weight:600}
 .row{font-size:14px}
 .row .k{color:var(--hint)}
 .price{font-size:23px;font-weight:800;margin-top:10px;background:linear-gradient(90deg,#fff,var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
@@ -188,6 +192,8 @@ option{background:var(--card);color:var(--text)}
       <div class="two"><select id="sYearFrom"></select><select id="sYearTo"></select></div></div>
     <div class="f"><label>Пробег</label>
       <select id="sKm" style="width:100%"><option value="">Не важно</option><option>до 30 000 км</option><option>до 50 000 км</option><option>до 70 000 км</option><option>до 100 000 км</option></select></div>
+    <div class="f"><span class="lbl">Привод</span>
+      <div class="seg" data-name="drive"><button type="button" data-v="Любой">Любой</button><button type="button" data-v="Передний">Передний</button><button type="button" data-v="Задний">Задний</button><button type="button" data-v="Полный">Полный</button></div></div>
     <div class="f"><span class="lbl">Состояние</span>
       <div class="seg" data-name="cond"><button type="button" data-v="Без окрасов">Без окрасов</button><button type="button" data-v="Допустимы окрасы">Допустимы окрасы</button></div></div>
     <div class="f"><span class="lbl">Цвета</span>
@@ -331,7 +337,8 @@ function specChips(c){
   if (c.type === "Электро") parts.push("электро"); else if (c.eng) parts.push(esc(c.eng));
   if (c.hpN) parts.push(c.hpN + " л.с.");
   if (c.gb) parts.push(esc(c.gb));
-  return `<div class="specs">${parts.map(p => `<span class="chip">${p}</span>`).join("")}</div>`;
+  const awd = /полн/i.test(c.drive || "") ? `<span class="chip awd">полный привод</span>` : "";
+  return `<div class="specs">${awd}${parts.map(p => `<span class="chip">${p}</span>`).join("")}</div>`;
 }
 function priceBlock(c){
   if (!c.priceN) return `<div class="price">Цена по запросу</div><div class="note">Рассчитаем стоимость под ключ для этой машины — оставьте заявку.</div>`;
@@ -587,7 +594,7 @@ function submitSearch(){
   colors = colors.map(c => c === "Другой" ? (other ? "другой: " + other : "другой") : c);
   send({kind: "search", ...d, car: $("sCar").value.trim(),
         years: yf || yt ? (yf ? "от " + yf : "") + (yf && yt ? " " : "") + (yt ? "до " + yt : "") : "",
-        km: $("sKm").value, cond: segVal("cond"), colors: colors.join(", "),
+        km: $("sKm").value, drive: segVal("drive"), cond: segVal("cond"), colors: colors.join(", "),
         budget: $("sBudget").value.trim(), city: $("sCity").value.trim()});
 }
 
