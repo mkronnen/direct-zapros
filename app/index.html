@@ -37,8 +37,11 @@ h2{font-size:21px;margin:2px 0 12px;letter-spacing:.2px}
 .big b{display:block;font-size:21px;margin-bottom:4px;position:relative}
 .big span{color:var(--hint);position:relative}
 .big .ico{position:absolute;right:18px;top:18px;font-size:26px;opacity:.9}
-.big.hero{min-height:230px;display:flex;flex-direction:column;justify-content:flex-start;background:url(garage.jpg) 30% 100%/cover;box-shadow:var(--shadow)}
-.big.hero:before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(11,20,22,.88) 0%,rgba(11,20,22,.55) 30%,rgba(11,20,22,0) 55%,rgba(11,20,22,0) 85%,rgba(11,20,22,.35) 100%)}
+.big.hero{aspect-ratio:1584/672;padding:12px 14px;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;background:url(garage.jpg) 100% 50%/cover;box-shadow:var(--shadow)}
+.big.hero>*{max-width:40%}
+.big.hero b{font-size:clamp(15px,4.4vw,21px);line-height:1.15;margin:4px 0 5px}
+.big.hero span#homeCount{font-size:clamp(11.5px,3.3vw,14px);line-height:1.35;white-space:nowrap}
+.big.hero:before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(11,20,22,.86) 0%,rgba(11,20,22,.62) 26%,rgba(11,20,22,.15) 42%,rgba(11,20,22,0) 50%)}
 .big.hero b,.big.hero span#homeCount{text-shadow:0 0 2px #000,0 0 6px #000,0 0 14px rgba(0,0,0,.9),0 1px 2px #000}
 .big.hero:after{content:"";position:absolute;inset:0;border-radius:22px;border:1px solid rgba(0,160,230,.45);pointer-events:none}
 .big.hero:after{transition:border-color .25s ease,box-shadow .25s ease}
@@ -47,7 +50,7 @@ h2{font-size:21px;margin:2px 0 12px;letter-spacing:.2px}
 .big.hero:active{transform:scale(.98);box-shadow:0 0 0 1px rgba(76,198,255,.95),0 0 36px 6px rgba(0,160,230,.7),var(--shadow)}
 .big.hero span#homeCount{color:#fff;font-weight:500}
 .big.glass{border:1px solid var(--line);animation-delay:.08s}
-.pill{display:inline-block;align-self:flex-start;font-size:12px;font-weight:600;padding:3px 10px;border-radius:20px;background:var(--accent);color:#fff;margin-bottom:8px;position:relative;box-shadow:0 4px 14px -4px rgba(0,160,230,.8)}
+.pill{display:inline-block;align-self:flex-start;font-size:12px;font-weight:600;padding:3px 10px;border-radius:20px;background:var(--accent);color:#fff;margin-bottom:6px;white-space:nowrap;position:relative;box-shadow:0 4px 14px -4px rgba(0,160,230,.8)}
 .big .pill{color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.35);letter-spacing:.2px}
 .foot{text-align:center;color:var(--hint);font-size:12px;margin-top:22px;opacity:.7}
 
@@ -152,7 +155,7 @@ option{background:var(--card);color:var(--text)}
 <section class="view on" id="home">
   <img class="logoimg" src="logo.png" alt="Прямой Автоимпорт">
   <p class="tagline">Автомобили из Китая, Кореи и Японии под ключ</p>
-  <button class="big hero" onclick="go('list')"><span class="pill">В наличии</span><b>Каталог автомобилей</b><span id="homeCount">Машины в Китае, готовые к покупке</span></button>
+  <button class="big hero" onclick="go('list')"><span class="pill">В наличии</span><b>Каталог<br>автомобилей</b><span id="homeCount">Машины в Китае, готовые к покупке</span></button>
   <button class="big glass" onclick="openSearch()"><span class="ico">🔎</span><b>Подобрать под заказ</b><span>Найдём машину под ваш запрос и бюджет</span></button>
   <div class="foot">directautoimport.ru</div>
 </section>
@@ -293,8 +296,8 @@ async function load(){
     const brands = [...new Set(CARS.map(c => c.brand))].sort();
     $("fBrand").innerHTML = '<option value="">Все марки</option>' + brands.map(b => `<option>${esc(b)}</option>`).join("");
     const priced = CARS.filter(c => c.priceN);
-    $("homeCount").textContent = CARS.length + " " + plural(CARS.length, "машина", "машины", "машин") +
-      (priced.length ? " · от " + fmt(Math.min(...priced.map(c => c.priceN))) + " ₽" : "");
+    $("homeCount").innerHTML = CARS.length + " " + plural(CARS.length, "машина", "машины", "машин") +
+      (priced.length ? "<br>от " + fmt(Math.min(...priced.map(c => c.priceN))) + " ₽" : "");
     render();
   } catch (e) {
     $("grid").innerHTML = '<div class="empty">Не удалось загрузить каталог. Попробуйте открыть позже.</div>';
