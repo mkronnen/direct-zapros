@@ -37,7 +37,7 @@ ADMIN_CHAT_ID = int(os.environ["ADMIN_CHAT_ID"])
 LEADS_CHAT_ID = int(os.environ.get("LEADS_CHAT_ID", ADMIN_CHAT_ID))
 DATA_DIR = Path(os.environ.get("DATA_DIR", "./data"))
 # мини-приложение отдаёт наш сервер (web.py за Caddy); запасная копия — на GitHub Pages: https://mkronnen.github.io/direct-zapros/app/
-APP_URL = os.environ.get("APP_URL", "https://195-133-20-31.sslip.io/")
+APP_URL = os.environ.get("APP_URL", "https://app.directautoimport.ru/")   # запасной адрес того же сервера: https://195-133-20-31.sslip.io/
 
 HERE = Path(__file__).parent
 TG = f"https://api.telegram.org/bot{BOT_TOKEN}"
