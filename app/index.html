@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
 <title>Прямой Автоимпорт</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="tg.js"></script>
 <style>
 :root{
   --bg:#0b1416; --bg2:#0f1b1e; --card:#13222a; --card2:#182b34;
@@ -244,6 +244,10 @@ option{background:var(--card);color:var(--text)}
 // ===== настройки =====
 const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQwOaGZlOwyIaH7SphCWmWXkNC1decOw_dpAZcrWMlW8Qqn1L05CPuX2FSN7KvX9rej2Sc7W9Lb1mZi/pub?gid=2075215146&single=true&output=csv";
 const IMG_HOST = "https://heyuncar.bebestweb.com/";
+// Своё зеркало (наш сервер): каталог и фото оттуда — быстрее и не зависит от доступности Google/GitHub/Китая.
+// На GitHub Pages — напрямую из Google и с китайского хостинга.
+const OWN = !/github\.io$/.test(location.hostname) && location.protocol === "https:";
+const CACHE_KEY = "catalog_csv_v1";
 
 const tg = window.Telegram && window.Telegram.WebApp;
 if (tg) {
@@ -290,30 +294,74 @@ function photoList(s){
   let list;
   if (s.includes(":")) { const [pre, ids] = s.split(":"); list = ids.split(",").map(id => pre + "/" + id); }
   else list = s.split(",");
-  return list.filter(Boolean).map(p => IMG_HOST + p.trim() + ".jpg");
+  return list.filter(Boolean).map(p => p.trim());   // путь фото без хоста и .jpg
 }
-const img = (u, w) => u + "?x-oss-process=image/resize,w_" + w;
+const imgDirect = (p, w) => IMG_HOST + p + ".jpg?x-oss-process=image/resize,w_" + w;
+const img = (p, w) => OWN ? "img/" + p + ".jpg?w=" + w : imgDirect(p, w);
+// если наше зеркало не отдало фото — один раз пробуем напрямую
+function imgErr(el){
+  if (el.dataset.fb) return; el.dataset.fb = 1;
+  const m = el.src.match(/img\/(.+)\.jpg\?w=(\d+)/); if (m) el.src = imgDirect(m[1], m[2]);
+}
+document.addEventListener("error", e => { if (e.target && e.target.tagName === "IMG") imgErr(e.target); }, true);
 
+// ===== загрузка каталога: сначала копия из памяти телефона, потом свежий; несколько попыток, долгое ожидание =====
+function fetchText(url, ms){
+  const ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const t = setTimeout(() => ctl && ctl.abort(), ms);
+  return fetch(url, ctl ? {signal: ctl.signal, cache: "no-store"} : {cache: "no-store"})
+    .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
+    .finally(() => clearTimeout(t));
+}
+function parseCatalog(text){
+  const rows = parseCSV(String(text || "").replace(/^\ufeff/, ""));
+  const h = (rows.shift() || []).map(x => x.trim());
+  if (h[0] !== "lot" || h.indexOf("brand") < 0) throw new Error("not a catalog");
+  const cars = rows.filter(r => r[0] && r.length > 5).map(r => { const o = {}; h.forEach((k, i) => o[k] = (r[i] || "").trim()); return o; })
+    .map(o => ({...o, priceN: num(o.price), kmN: num(o.km), hpN: num(o.hp), ph: photoList(o.photos),
+                madeN: (o.made || "").split(".").reverse().join("")}));
+  if (!cars.length) throw new Error("empty catalog");
+  const first = rows[0] || [];
+  return {cars, cny: (first[h.indexOf("cny")] || "").replace(/(,\d\d)\d+$/, "$1"), date: first[h.indexOf("date")] || ""};
+}
+function apply(cat){
+  CARS = cat.cars; META.cny = cat.cny; META.date = cat.date;
+  const keep = $("fBrand").value;
+  const brands = [...new Set(CARS.map(c => c.brand))].sort();
+  $("fBrand").innerHTML = '<option value="">Все марки</option>' + brands.map(b => `<option>${esc(b)}</option>`).join("");
+  if (brands.includes(keep)) $("fBrand").value = keep;
+  const priced = CARS.filter(c => c.priceN);
+  $("homeCount").innerHTML = CARS.length + " " + plural(CARS.length, "машина", "машины", "машин") +
+    (priced.length ? "<br>от " + fmt(Math.min(...priced.map(c => c.priceN))) + " ₽" : "");
+  render();
+}
+let loading = false;
 async function load(){
-  try {
-    const r = await fetch(CSV_URL + (CSV_URL.includes("?") ? "&" : "?") + "t=" + Date.now());
-    const rows = parseCSV(await r.text());
-    const h = rows.shift().map(x => x.trim());
-    CARS = rows.filter(r => r[0]).map(r => { const o = {}; h.forEach((k, i) => o[k] = (r[i] || "").trim()); return o; })
-      .map(o => ({...o, priceN: num(o.price), kmN: num(o.km), hpN: num(o.hp), ph: photoList(o.photos),
-                  madeN: (o.made || "").split(".").reverse().join("")}));
-    const first = rows[0] || [];
-    META.cny = (first[h.indexOf("cny")] || "").replace(/(,\d\d)\d+$/, "$1");
-    META.date = first[h.indexOf("date")] || "";
-    const brands = [...new Set(CARS.map(c => c.brand))].sort();
-    $("fBrand").innerHTML = '<option value="">Все марки</option>' + brands.map(b => `<option>${esc(b)}</option>`).join("");
-    const priced = CARS.filter(c => c.priceN);
-    $("homeCount").innerHTML = CARS.length + " " + plural(CARS.length, "машина", "машины", "машин") +
-      (priced.length ? "<br>от " + fmt(Math.min(...priced.map(c => c.priceN))) + " ₽" : "");
-    render();
-  } catch (e) {
-    $("grid").innerHTML = '<div class="empty">Не удалось загрузить каталог. Попробуйте открыть позже.</div>';
+  if (loading) return; loading = true;
+  let shown = false;
+  try {   // мгновенно показываем то, что было в прошлый раз
+    const saved = localStorage.getItem(CACHE_KEY);
+    if (saved) { apply(parseCatalog(saved)); shown = true; }
+  } catch (e) {}
+  if (!shown) $("grid").innerHTML = '<div class="empty">Загружаем каталог…<br><span class="muted">при медленном интернете это может занять до минуты</span></div><div class="skel"></div><div class="skel"></div>';
+  const bucket = Math.floor(Date.now() / 300000);   // одна и та же ссылка 5 минут — меньше нагрузка и блокировок у Google
+  const sources = (OWN ? ["api/catalog.csv"] : []).concat([CSV_URL + "&t=" + bucket]);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    for (const url of sources) {
+      try {
+        const text = await fetchText(url, 25000 + attempt * 20000);
+        const cat = parseCatalog(text);
+        apply(cat);
+        try { localStorage.setItem(CACHE_KEY, text); } catch (e) {}
+        loading = false;
+        return;
+      } catch (e) {}
+    }
+    await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
   }
+  loading = false;
+  if (!shown) $("grid").innerHTML = '<div class="empty">Не получилось загрузить каталог — похоже, медленный интернет.<br><br>' +
+    '<button class="btn" onclick="load()">Повторить</button></div>';
 }
 function plural(n, a, b, c){ n %= 100; if (n > 10 && n < 20) return c; n %= 10; return n === 1 ? a : n >= 2 && n <= 4 ? b : c; }
 
@@ -580,7 +628,7 @@ function readContacts(p){
 // ===== покупка машины из каталога =====
 function openBuy(){
   const c = current;
-  $("buyCar").innerHTML = `<div class="carmini">${c.ph[0] ? `<img src="${img(c.ph[0], 240)}">` : ""}<div>
+  $("buyCar").innerHTML = `<div class="carmini">${c.ph[0] ? `<img src="${img(c.ph[0], 640)}">` : ""}<div>
     <b>${esc(c.brand)} ${esc(c.model)}</b><div class="muted" style="font-size:13px">${esc(c.made)} · ${fmt(c.kmN)} км${c.priceN ? " · ≈ " + fmt(c.priceN) + " ₽" : ""}</div></div></div>`;
   $("buyContacts").innerHTML = contactsHTML("b");
   go("buy");
