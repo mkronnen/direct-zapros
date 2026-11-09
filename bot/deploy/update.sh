@@ -13,6 +13,54 @@ journal_tail() { journalctl -u direct-bot -n 20 --no-pager -o cat | tail -c 1500
 # боту нужен доступ к своему журналу для команды /logs
 id -nG bot | grep -qw systemd-journal || usermod -aG systemd-journal bot
 
+# ---------- веб-сервер Caddy (HTTPS) для мини-приложения: ставим один раз, конфиг берём из репозитория
+CADDY_VER=2.8.4
+if [ ! -x /usr/local/bin/caddy ]; then
+  case $(uname -m) in x86_64) A=amd64;; aarch64) A=arm64;; *) A=amd64;; esac
+  if curl -fsSL -m 180 "https://github.com/caddyserver/caddy/releases/download/v$CADDY_VER/caddy_${CADDY_VER}_linux_$A.tar.gz" -o /tmp/caddy.tgz \
+     && tar xzf /tmp/caddy.tgz -C /usr/local/bin caddy; then
+    chmod +x /usr/local/bin/caddy
+  else
+    tg "⚠️ Не удалось скачать Caddy (веб-сервер приложения), попробую через минуту"
+  fi
+  rm -f /tmp/caddy.tgz
+fi
+if [ -x /usr/local/bin/caddy ]; then
+  mkdir -p /etc/caddy /var/lib/caddy
+  if [ ! -f /etc/systemd/system/caddy.service ]; then
+    cat > /etc/systemd/system/caddy.service <<'UNIT'
+[Unit]
+Description=Caddy (HTTPS for mini app)
+After=network-online.target
+
+[Service]
+Environment=XDG_DATA_HOME=/var/lib XDG_CONFIG_HOME=/etc
+ExecStart=/usr/local/bin/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+ExecReload=/usr/local/bin/caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+    systemctl daemon-reload
+  fi
+  if ! cmp -s app/bot/deploy/Caddyfile /etc/caddy/Caddyfile; then
+    cp app/bot/deploy/Caddyfile /etc/caddy/Caddyfile
+    if command -v ufw > /dev/null && ufw status | grep -q "Status: active"; then ufw allow 80/tcp; ufw allow 443/tcp; fi
+    if systemctl is-active -q caddy; then systemctl reload caddy; else systemctl enable --now caddy; fi
+    sleep 15
+    if systemctl is-active -q caddy; then
+      tg "🌐 Веб-сервер приложения запущен: https://$(head -n 3 /etc/caddy/Caddyfile | grep -o '^[^ #{]*\.[a-z]*' | head -1)/"
+    else
+      tg "⚠️ Caddy не запустился
+$(journalctl -u caddy -n 15 --no-pager -o cat | tail -c 1200)"
+    fi
+  fi
+  systemctl is-active -q caddy || systemctl start caddy
+fi
+
 HEAD=$(git -C app rev-parse --short HEAD)
 LAST=$(cat .deployed 2>/dev/null)
 
