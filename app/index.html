@@ -71,6 +71,16 @@ option{background:var(--card);color:var(--text)}
 .strip::-webkit-scrollbar{display:none}
 .strip img{flex:0 0 100%;width:100%;height:100%;object-fit:cover;scroll-snap-align:center;scroll-snap-stop:always;display:block;background:#0a1214}
 .car-ph .none{position:absolute;inset:0;display:grid;place-items:center;color:var(--hint);font-size:13px}
+.nav{position:absolute;top:50%;transform:translateY(-50%);width:38px;height:38px;border-radius:50%;border:0;padding:0 0 3px;background:rgba(11,20,22,.6);color:#fff;font-size:26px;line-height:1;cursor:pointer;display:none;align-items:center;justify-content:center;z-index:3;transition:opacity .2s,background .2s}
+.nav:hover{background:var(--accent)}
+.nav.prev{left:8px}.nav.next{right:8px}
+#viewer .nav{width:52px;height:52px;font-size:34px}
+#viewer .nav.prev{left:16px}#viewer .nav.next{right:16px}
+@media (hover:hover) and (pointer:fine){
+  .car-ph .nav,#viewer .nav{display:flex}
+  .car-ph .nav{opacity:.55}
+  .car-ph:hover .nav{opacity:1}
+}
 .dots{position:absolute;left:0;right:0;bottom:8px;display:flex;justify-content:center;gap:5px;pointer-events:none}
 .dots i{width:6px;height:6px;border-radius:3px;background:rgba(255,255,255,.45);transition:all .2s}
 .dots i.on{width:16px;background:#fff}
@@ -225,6 +235,8 @@ option{background:var(--card);color:var(--text)}
 <div id="viewer">
   <div id="vStage"><img id="vImg" alt=""></div>
   <div class="vbar"><span id="vIdx"></span><button onclick="closeViewer()" aria-label="Закрыть">✕</button></div>
+  <button class="nav prev" onclick="vStep(-1)" aria-label="Предыдущее фото">‹</button>
+  <button class="nav next" onclick="vStep(1)" aria-label="Следующее фото">›</button>
   <div class="vhelp">Разведите пальцы или нажмите дважды, чтобы приблизить</div>
 </div>
 
@@ -312,6 +324,7 @@ function carousel(c, big){
   return `<div class="car-ph">
       <div class="strip" onscroll="stripScroll(this)">${c.ph.map((u, k) =>
         `<img src="${img(u, w)}" alt="" ${k ? 'loading="lazy"' : ""} draggable="false" ${big ? `onclick="openViewer(${k})"` : ""}>`).join("")}</div>
+      ${c.ph.length > 1 ? `<button class="nav prev" onclick="navStep(event,this,-1)" aria-label="Предыдущее фото">‹</button><button class="nav next" onclick="navStep(event,this,1)" aria-label="Следующее фото">›</button>` : ""}
       ${c.ph.length > 1 ? `<div class="dots">${c.ph.map((_, k) => `<i class="${k ? "" : "on"}"></i>`).join("")}</div>` : ""}
       ${big ? `<span class="idx">1 / ${c.ph.length}</span><span class="zoomhint">🔍 нажмите, чтобы увеличить</span>` : ""}
     </div>
@@ -333,6 +346,13 @@ function stripScroll(s){
     }
     haptic("soft");
   });
+}
+// стрелки для компьютера (на телефоне — свайп)
+function navStep(e, b, d){
+  e.stopPropagation();
+  const s = b.parentElement.querySelector(".strip"), n = s.children.length;
+  const k = (Math.round(s.scrollLeft / s.clientWidth) + d + n) % n;
+  s.scrollTo({left: k * s.clientWidth, behavior: "smooth"});
 }
 function toSlide(k){ const s = document.querySelector("#car .strip"); s && s.scrollTo({left: k * s.clientWidth, behavior: "smooth"}); }
 
@@ -489,9 +509,10 @@ document.addEventListener("keydown", e => {
   if (!$("viewer").classList.contains("on")) return;
   const n = current.ph.length;
   if (e.key === "Escape") closeViewer();
-  if (e.key === "ArrowRight") { V.i = (V.i + 1) % n; vLoad(); }
-  if (e.key === "ArrowLeft") { V.i = (V.i - 1 + n) % n; vLoad(); }
+  if (e.key === "ArrowRight") vStep(1);
+  if (e.key === "ArrowLeft") vStep(-1);
 });
+function vStep(d){ const n = current.ph.length; if (n < 2) return; V.i = (V.i + d + n) % n; vLoad(); }
 
 // ===== контакты (общий блок для обеих форм) =====
 const tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
