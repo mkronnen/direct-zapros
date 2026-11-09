@@ -955,6 +955,7 @@ async def on_want(cq: dict, lot: str):
 def stats_text(hours: int) -> str:
     since = time.time() - hours * 3600
     cnt = lambda kind: db.execute("SELECT COUNT(*) FROM events WHERE kind=? AND ts>?", (kind, since)).fetchone()[0]
+    cnt_like = lambda pat: db.execute("SELECT COUNT(*) FROM events WHERE kind LIKE ? AND ts>?", (pat, since)).fetchone()[0]
     return (f"📊 Бот за {hours} ч\n"
             f"Новых клиентов: {cnt('new_user')}, нажали /start: {cnt('start')}\n"
             f"Заявок из приложения: {cnt('lead_app')}\n"
@@ -962,6 +963,7 @@ def stats_text(hours: int) -> str:
             f"Открыли: этапы {cnt('steps')}, договор {cnt('contract')}, отзывы {cnt('reviews')}, "
             f"контакты {cnt('contacts')}, канал {cnt('channel')}, чат {cnt('chat')}\n"
             f"Из подборок в канале: открыли машин {cnt('post_lot')}, «Хочу эту машину» {cnt('want')}\n"
+            f"Приложение: каталог загрузился {cnt_like('app_ok:%')} раз, ошибок у клиентов {cnt_like('app_err:%')}\n"
             f"Ошибок: {cnt('error')}"
             + refs_text(since))
 
@@ -1012,6 +1014,19 @@ def version() -> str:
         return "?"
 
 
+async def on_client_log(d: dict):
+    """Сообщение от мини-приложения на телефоне клиента: ошибка — Артёму, успешная загрузка — в статистику."""
+    plat = d.get("p") or ("ios" if re.search(r"iPhone|iPad", d.get("ua", "")) else "?")
+    if d.get("k") == "ok":
+        event(f"app_ok:{plat}")
+        return
+    event(f"app_err:{plat}")
+    ios = re.search(r"OS (\d+[_\d]*) like Mac", d.get("ua", ""))
+    dev = f"{plat}" + (f", iOS {ios.group(1).replace('_', '.')}" if ios else "") + (f", Telegram API {d['v']}" if d.get("v") else "")
+    await report(f"мини-приложение у клиента ({dev}): {d.get('k')}",
+                 f"{d.get('m', '')}\n\nАдрес: {d.get('h', '')}\nUA: {d.get('ua', '')[:250]}")
+
+
 # ---------------------------------------------------------------- главный цикл
 
 async def main():
@@ -1037,7 +1052,7 @@ async def main():
     asyncio.create_task(daily_report_loop())
     asyncio.create_task(autopost_loop())
     try:   # веб-сервер мини-приложения (за Caddy): каталог и фото с нашего сервера
-        await web.Site(DATA_DIR, http).start(report)
+        await web.Site(DATA_DIR, http, on_log=on_client_log).start(report)
     except Exception:
         await report("не запустился веб-сервер приложения", traceback.format_exc())
     offset = int(kv_get("offset", 0))

@@ -29,8 +29,10 @@ IMG_MAX_AGE = 45 * 86400  # фото, которые давно не запра�
 
 
 class Site:
-    def __init__(self, data_dir: Path, http: httpx.AsyncClient):
+    def __init__(self, data_dir: Path, http: httpx.AsyncClient, on_log=None):
         self.http = http
+        self.on_log = on_log            # сообщения об ошибках с телефонов клиентов → боту
+        self.log_hits: dict[str, list[float]] = {}
         self.dir = data_dir / "web"
         self.img_dir = self.dir / "img"
         self.img_dir.mkdir(parents=True, exist_ok=True)
@@ -181,6 +183,34 @@ class Site:
         cache = "no-cache" if name.endswith(".html") else "public, max-age=86400"
         return web.FileResponse(f, headers={"Cache-Control": cache})
 
+    async def client_log(self, request: web.Request):
+        """Приложение у клиента сообщает об ошибке (или что каталог загрузился). Не чаще 20 раз в час с одного IP."""
+        hdr = {"Access-Control-Allow-Origin": "*"}
+        ip = request.headers.get("X-Forwarded-For", request.remote or "").split(",")[0].strip()
+        now = time.time()
+        hits = [t for t in self.log_hits.get(ip, []) if now - t < 3600]
+        if len(hits) >= 20:
+            return web.Response(status=204, headers=hdr)
+        self.log_hits[ip] = hits + [now]
+        if len(self.log_hits) > 5000:
+            self.log_hits.clear()
+        try:
+            raw = await request.content.read(4096)
+            import json
+            d = json.loads(raw.decode("utf-8", "replace"))
+            d = {k: str(d.get(k, ""))[:600] for k in ("k", "m", "ua", "h", "p", "v")}
+        except Exception:
+            return web.Response(status=204, headers=hdr)
+        log.info("клиент %s: %s", d["k"], d)
+        with open(self.dir / "client_log.txt", "a", encoding="utf-8") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + json.dumps(d, ensure_ascii=False) + "\n")
+        if self.on_log:
+            try:
+                await self.on_log(d)
+            except Exception as e:
+                log.warning("on_log: %s", e)
+        return web.Response(status=204, headers=hdr)
+
     async def health(self, request: web.Request):
         return web.json_response({"ok": True, "catalog_age": int(time.time() - self.csv_ts) if self.csv_ts else None,
                                   "catalog_bytes": len(self.csv)})
@@ -212,6 +242,7 @@ class Site:
         app = web.Application()
         app.router.add_get("/api/catalog.csv", self.catalog)
         app.router.add_get("/api/health", self.health)
+        app.router.add_post("/api/log", self.client_log)
         app.router.add_get("/img/{path:.+}", self.image)
         app.router.add_get("/tg.js", self.tg_script)
         app.router.add_get("/", self.static)
