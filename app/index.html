@@ -75,6 +75,7 @@ h2{font-size:21px;margin:2px 0 12px;letter-spacing:.2px}
 .big.hero span#homeCount{color:#fff;font-weight:500}
 .big.glass{border:1px solid var(--line);animation-delay:.08s}
 .pill{display:inline-block;align-self:flex-start;font-size:12px;font-weight:600;padding:3px 10px;border-radius:20px;background:var(--accent);color:#fff;margin-bottom:6px;white-space:nowrap;position:relative;box-shadow:0 4px 14px -4px rgba(0,160,230,.8)}
+.big.hero>.pill{max-width:none}
 .big .pill{color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.35);letter-spacing:.2px}
 .foot{text-align:center;color:var(--hint);font-size:12px;margin-top:22px;opacity:.7}
 
@@ -194,7 +195,7 @@ option{background:var(--card);color:var(--text)}
 <section class="view on" id="home">
   <img class="logoimg" src="logo.png" alt="Прямой Автоимпорт">
   <p class="tagline">Автомобили из Китая, Кореи и Японии под ключ</p>
-  <button class="big hero" onclick="go('list')"><span class="pill">В наличии</span><b>Каталог<br>автомобилей</b><span id="homeCount">Машины в Китае, готовые к покупке</span></button>
+  <button class="big hero" onclick="go('list')"><span class="pill">В наличии у партнёров</span><b>Каталог<br>автомобилей</b><span id="homeCount">Машины в Китае, готовые к покупке</span></button>
   <button class="big glass" onclick="openSearch()"><span class="ico">🔎</span><b>Подобрать под заказ</b><span>Найдём машину под ваш запрос и бюджет</span></button>
   <div class="foot">directautoimport.ru</div>
 </section>
@@ -202,7 +203,7 @@ option{background:var(--card);color:var(--text)}
 <!-- каталог -->
 <section class="view" id="list">
   <div class="top">
-    <h2>Авто в наличии</h2>
+    <h2>В наличии у партнёров</h2>
     <div class="bar">
       <select id="fBrand" onchange="render()"><option value="">Все марки</option></select>
       <select id="fSort" onchange="render()">
