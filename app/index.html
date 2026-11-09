@@ -8,7 +8,7 @@
 <script>
 // Сообщения об ошибках с телефонов клиентов уходят боту (написано на старом JS — сработает даже там, где основной код не запустится)
 (function(){
-  var sent = 0, base = location.hostname.indexOf("github.io") >= 0 ? "https://app.directautoimport.ru/" : "";
+  var sent = 0, base = location.hostname.indexOf("github.io") >= 0 ? "https://195-133-20-31.sslip.io/" : "";
   function rep(kind, msg){
     if (sent++ > 6) return;
     try {
