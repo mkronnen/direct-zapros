@@ -58,10 +58,11 @@ REVIEWS_URL = "https://t.me/+qnIV-9KL7lYwNDUy"
 
 def kb(chat_id: int | None = None) -> dict:
     """Клавиатура снизу. Если клиент пришёл по реферальной ссылке — промокод уходит в мини-приложение."""
-    url = APP_URL
+    # v=версия репозитория: после каждого обновления приложения у клиентов открывается свежая версия, а не из кэша Telegram
+    url = APP_URL + ("&" if "?" in APP_URL else "?") + "v=" + app_version()
     promo = kv_get(f"promo:{chat_id}") if chat_id else None
     if promo:
-        url += ("&" if "?" in url else "?") + "promo=" + promo
+        url += "&promo=" + promo
     return {"keyboard": [[{"text": BTN_APP, "web_app": {"url": url}, "style": "danger"}],   # danger = красная кнопка
                          [{"text": BTN_CHANNEL}, {"text": BTN_CHAT}],
                          [{"text": BTN_STEPS}, {"text": BTN_CONTRACT}],
@@ -503,6 +504,16 @@ async def daily_report_loop():
             except Exception as e:
                 log.error("daily report: %s", e)
         await asyncio.sleep(60)
+
+
+_APP_VER = None
+
+
+def app_version() -> str:
+    global _APP_VER
+    if _APP_VER is None:
+        _APP_VER = version() if version() != "?" else str(int(time.time()))
+    return _APP_VER
 
 
 def version() -> str:
