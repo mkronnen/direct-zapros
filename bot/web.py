@@ -211,6 +211,22 @@ class Site:
                 log.warning("on_log: %s", e)
         return web.Response(status=204, headers=hdr)
 
+    async def site_photos(self, request: web.Request):
+        """Все фото машин с сайта поставщика по номерам страниц (для ручного подбора главного фото)."""
+        import sync
+        ids = [i for i in request.query.get("ids", "").split(",") if i.isdigit()][:60]
+        sem = asyncio.Semaphore(6)
+
+        async def one(i):
+            async with sem:
+                try:
+                    site = await sync.fetch_page(self.http, f"http://avtomirhrb.ru/?car_1/{i}.html")
+                    return i, (site or {}).get("photos", [])
+                except Exception as e:
+                    return i, "error: " + str(e)[:80]
+        res = dict(await asyncio.gather(*(one(i) for i in ids)))
+        return web.json_response(res, headers={"Access-Control-Allow-Origin": "*"})
+
     async def health(self, request: web.Request):
         return web.json_response({"ok": True, "catalog_age": int(time.time() - self.csv_ts) if self.csv_ts else None,
                                   "catalog_bytes": len(self.csv)})
@@ -242,6 +258,7 @@ class Site:
         app = web.Application()
         app.router.add_get("/api/catalog.csv", self.catalog)
         app.router.add_get("/api/health", self.health)
+        app.router.add_get("/api/site-photos", self.site_photos)
         app.router.add_post("/api/log", self.client_log)
         app.router.add_get("/img/{path:.+}", self.image)
         app.router.add_get("/tg.js", self.tg_script)
