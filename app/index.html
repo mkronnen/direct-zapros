@@ -366,12 +366,12 @@ async function load(){
 function plural(n, a, b, c){ n %= 100; if (n > 10 && n < 20) return c; n %= 10; return n === 1 ? a : n >= 2 && n <= 4 ? b : c; }
 
 // ===== фото: карусель со свайпом =====
-function carousel(c, big){
+function carousel(c, big, eager){
   if (!c.ph.length) return `<div class="car-ph"><div class="none">Фото скоро появятся</div></div>`;
   const w = big ? 1000 : 640;
   return `<div class="car-ph">
       <div class="strip" onscroll="stripScroll(this)">${c.ph.map((u, k) =>
-        `<img src="${img(u, w)}" alt="" ${k ? 'loading="lazy"' : ""} draggable="false" ${big ? `onclick="openViewer(${k})"` : ""}>`).join("")}</div>
+        `<img src="${img(u, w)}" alt="" ${k || !(big || eager) ? 'loading="lazy"' : ""} decoding="async" draggable="false" ${big ? `onclick="openViewer(${k})"` : ""}>`).join("")}</div>
       ${c.ph.length > 1 ? `<button class="nav prev" onclick="navStep(event,this,-1)" aria-label="Предыдущее фото">‹</button><button class="nav next" onclick="navStep(event,this,1)" aria-label="Следующее фото">›</button>` : ""}
       ${c.ph.length > 1 ? `<div class="dots">${c.ph.map((_, k) => `<i class="${k ? "" : "on"}"></i>`).join("")}</div>` : ""}
       ${big ? `<span class="idx">1 / ${c.ph.length}</span><span class="zoomhint">🔍 нажмите, чтобы увеличить</span>` : ""}
@@ -422,7 +422,7 @@ function priceBlock(c){
     <div class="note">Расчёт ориентировочный, за точным расчётом обратитесь к менеджеру.</div>`;
 }
 function tile(c, idx){
-  return `<div class="lot" style="--i:${Math.min(idx, 10)}">${carousel(c, false)}
+  return `<div class="lot" style="--i:${Math.min(idx, 10)}">${carousel(c, false, idx < 4)}
     <div class="info">
       <div class="ttl">${esc(c.brand)} ${esc(c.model)}</div>
       <div class="trim">${esc(c.trim)}</div>
