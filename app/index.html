@@ -293,6 +293,7 @@ let CARS = [], META = {cny: "", date: ""}, current = null, stack = ["home"];
 
 // ===== навигация =====
 function show(id){
+  try { sessionStorage.setItem("view_now", id); } catch (e) {}
   document.querySelectorAll(".view").forEach(v => v.classList.toggle("on", v.id === id));
   window.scrollTo(0, 0);
   if (tg && tg.BackButton) { stack.length > 1 ? tg.BackButton.show() : tg.BackButton.hide(); }
@@ -302,7 +303,13 @@ function back(){
   if ($("viewer").classList.contains("on")) return closeViewer();
   if (stack.length > 1) { stack.pop(); show(stack[stack.length - 1]); }
 }
-if (tg && tg.BackButton) tg.BackButton.onClick(back);
+if (tg && tg.BackButton) { tg.BackButton.onClick(back); tg.BackButton.hide(); }
+// если Telegram перезапустил страницу посреди каталога (обычно — не хватило памяти), сообщаем боту
+try {
+  const was = sessionStorage.getItem("view_now");
+  if (was && was !== "home" && window.__rep) window.__rep("reload", "страница перезапустилась, была открыта: " + was);
+  sessionStorage.setItem("view_now", "home");
+} catch (e) {}
 
 // ===== данные =====
 function parseCSV(t){
@@ -403,20 +410,31 @@ function plural(n, a, b, c){ n %= 100; if (n > 10 && n < 20) return c; n %= 10; 
 function carousel(c, big, eager){
   if (!c.ph.length) return `<div class="car-ph"><div class="none">Фото скоро появятся</div></div>`;
   const w = big ? 1000 : 640;
+  // В DOM сразу грузится только первое фото (и то — когда плитка близко к экрану), остальные — при перелистывании.
+  // Иначе на айфоне 146 машин × 10 фото не помещаются в память и Telegram перезапускает страницу.
+  const at = (u, k) => (big ? k < 2 : (k === 0 && eager)) ? `src="${img(u, w)}"`
+    : `data-src="${img(u, w)}"` + (!big && k === 0 ? ' class="lz"' : "");
   return `<div class="car-ph">
       <div class="strip" onscroll="stripScroll(this)">${c.ph.map((u, k) =>
-        `<img src="${img(u, w)}" alt="" ${k || !(big || eager) ? 'loading="lazy"' : ""} decoding="async" draggable="false" ${big ? `onclick="openViewer(${k})"` : ""}>`).join("")}</div>
+        `<img ${at(u, k)} alt="" decoding="async" draggable="false" ${big ? `onclick="openViewer(${k})"` : ""}>`).join("")}</div>
       ${c.ph.length > 1 ? `<button class="nav prev" onclick="navStep(event,this,-1)" aria-label="Предыдущее фото">‹</button><button class="nav next" onclick="navStep(event,this,1)" aria-label="Следующее фото">›</button>` : ""}
       ${c.ph.length > 1 ? `<div class="dots">${c.ph.map((_, k) => `<i class="${k ? "" : "on"}"></i>`).join("")}</div>` : ""}
       ${big ? `<span class="idx">1 / ${c.ph.length}</span><span class="zoomhint">🔍 нажмите, чтобы увеличить</span>` : ""}
     </div>
     ${big && c.ph.length > 1 ? `<div class="thumbs">${c.ph.map((u, k) => `<img src="${img(u, 160)}" class="${k ? "" : "on"}" loading="lazy" onclick="toSlide(${k})">`).join("")}</div>` : ""}`;
 }
+function loadAt(s, k){
+  for (let j = k - 1; j <= k + 1; j++) {
+    const im = s.children[j];
+    if (im && im.dataset.src && !im.getAttribute("src")) { im.src = im.dataset.src; im.classList.remove("lz"); }
+  }
+}
 function stripScroll(s){
   if (s._raf) return;
   s._raf = requestAnimationFrame(() => {
     s._raf = 0;
     const k = Math.round(s.scrollLeft / s.clientWidth);
+    loadAt(s, k);
     if (s._k === k) return; s._k = k;
     const box = s.parentElement;
     box.querySelectorAll(".dots i").forEach((d, j) => d.classList.toggle("on", j === k));
@@ -434,9 +452,10 @@ function navStep(e, b, d){
   e.stopPropagation();
   const s = b.parentElement.querySelector(".strip"), n = s.children.length;
   const k = (Math.round(s.scrollLeft / s.clientWidth) + d + n) % n;
+  loadAt(s, k);
   s.scrollTo({left: k * s.clientWidth, behavior: "smooth"});
 }
-function toSlide(k){ const s = document.querySelector("#car .strip"); s && s.scrollTo({left: k * s.clientWidth, behavior: "smooth"}); }
+function toSlide(k){ const s = document.querySelector("#car .strip"); if (s) { loadAt(s, k); s.scrollTo({left: k * s.clientWidth, behavior: "smooth"}); } }
 
 // ===== каталог =====
 function specChips(c){
@@ -478,7 +497,33 @@ function render(){
     return (x.kmN - y.kmN) * dir;
   });
   $("count").textContent = VIEW.length + " " + plural(VIEW.length, "машина", "машины", "машин");
-  $("grid").innerHTML = VIEW.length ? VIEW.map((c, i) => tile(c, i)).join("") : '<div class="empty">Ничего не найдено</div>';
+  shownN = 0;
+  $("grid").innerHTML = VIEW.length ? "" : '<div class="empty">Ничего не найдено</div>';
+  more();
+}
+// плитки добавляются порциями по мере прокрутки — меньше памяти и быстрее на слабых телефонах
+const PAGE = 16;
+let shownN = 0;
+const hasIO = typeof IntersectionObserver !== "undefined";
+const lazyIO = hasIO ? new IntersectionObserver(es => es.forEach(e => {
+  if (!e.isIntersecting) return;
+  const im = e.target; lazyIO.unobserve(im);
+  if (im.dataset.src && !im.getAttribute("src")) im.src = im.dataset.src;
+  im.classList.remove("lz");
+}), {rootMargin: "300px 0px"}) : null;
+const moreIO = hasIO ? new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) more(); }), {rootMargin: "600px 0px"}) : null;
+function more(){
+  const grid = $("grid"), old = $("moreBox");
+  if (old) { if (moreIO) moreIO.unobserve(old); old.remove(); }
+  const part = VIEW.slice(shownN, shownN + PAGE);
+  grid.insertAdjacentHTML("beforeend", part.map((c, i) => tile(c, shownN + i)).join(""));
+  shownN += part.length;
+  grid.querySelectorAll("img.lz").forEach(im => { if (lazyIO) lazyIO.observe(im); else { im.src = im.dataset.src; im.classList.remove("lz"); } });
+  if (shownN < VIEW.length) {
+    grid.insertAdjacentHTML("beforeend", '<div id="moreBox" style="grid-column:1/-1;text-align:center;padding:6px 0 14px">' +
+      '<button class="btn ghost" onclick="more()">Показать ещё</button></div>');
+    if (moreIO) moreIO.observe($("moreBox"));
+  }
 }
 
 // ===== карточка =====
