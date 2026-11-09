@@ -4,132 +4,165 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
-<title>Direct Autoimport</title>
+<title>Прямой Автоимпорт</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{
-  --bg: var(--tg-theme-bg-color, #ffffff);
-  --bg2: var(--tg-theme-secondary-bg-color, #f2f3f5);
-  --text: var(--tg-theme-text-color, #15171a);
-  --hint: var(--tg-theme-hint-color, #8a9099);
-  --link: var(--tg-theme-link-color, #2a7de1);
-  --btn: var(--tg-theme-button-color, #2a7de1);
-  --btn-text: var(--tg-theme-button-text-color, #ffffff);
-  --card: var(--tg-theme-section-bg-color, var(--tg-theme-bg-color, #ffffff));
-  --line: color-mix(in srgb, var(--hint) 25%, transparent);
-  --err: #e5484d;
-  --r: 14px;
+  --bg:#0b1416; --bg2:#0f1b1e; --card:#13222a; --card2:#182b34;
+  --text:#eef4f6; --hint:#8b9ea6; --accent:#00a0e6; --accent2:#4cc6ff;
+  --line:rgba(255,255,255,.08); --err:#ff5d63; --r:18px;
+  --glow:0 10px 30px -12px rgba(0,160,230,.55);
+  --shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 12px 28px -14px rgba(0,0,0,.7);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;background:var(--bg2);color:var(--text);font:15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.42 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+body:before{content:"";position:fixed;right:-120px;bottom:-60px;width:520px;height:526px;background:url(x.png) center/contain no-repeat;opacity:.045;pointer-events:none;z-index:0}
+body:after{content:"";position:fixed;inset:0;background:radial-gradient(900px 500px at 110% -10%,rgba(0,160,230,.16),transparent 60%),radial-gradient(700px 400px at -20% 110%,rgba(0,160,230,.08),transparent 60%);pointer-events:none;z-index:0}
 button{font:inherit;color:inherit}
-.view{display:none;min-height:100vh;padding:14px 14px calc(24px + env(safe-area-inset-bottom))}
-.view.on{display:block}
-h1{font-size:22px;margin:4px 0 2px}
-h2{font-size:19px;margin:2px 0 12px}
-.sub{color:var(--hint);margin:0 0 18px}
+.view{display:none;position:relative;z-index:1;min-height:100vh;padding:14px 14px calc(28px + env(safe-area-inset-bottom))}
+.view.on{display:block;animation:fade .28s ease both}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes up{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}
+h2{font-size:21px;margin:2px 0 12px;letter-spacing:.2px}
 .muted{color:var(--hint)}
 
 /* главная */
-.brand{display:flex;align-items:center;gap:10px;margin:6px 0 4px}
-.logo{width:40px;height:40px;border-radius:12px;background:var(--btn);color:var(--btn-text);display:grid;place-items:center;font-weight:800;letter-spacing:-.5px}
-.big{display:block;width:100%;text-align:left;border:0;border-radius:18px;padding:20px 18px;margin:0 0 12px;background:var(--card);cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06)}
-.big b{display:block;font-size:19px;margin-bottom:4px}
-.big span{color:var(--hint)}
-.big.primary{background:var(--btn);color:var(--btn-text)}
-.big.primary span{color:color-mix(in srgb, var(--btn-text) 80%, transparent)}
-.big .ico{font-size:28px;float:right;line-height:1}
+.logoimg{display:block;width:min(78%,360px);margin:18px auto 8px;filter:drop-shadow(0 6px 22px rgba(0,160,230,.25))}
+.tagline{text-align:center;color:var(--hint);margin:0 0 22px;font-size:14px;letter-spacing:.3px}
+.big{position:relative;display:block;width:100%;text-align:left;border:0;border-radius:22px;padding:22px 20px;margin:0 0 14px;background:linear-gradient(160deg,var(--card2),var(--card));cursor:pointer;box-shadow:var(--shadow);overflow:hidden;transition:transform .15s ease;animation:up .45s both}
+.big:active{transform:scale(.98)}
+.big b{display:block;font-size:21px;margin-bottom:4px;position:relative}
+.big span{color:var(--hint);position:relative}
+.big .ico{position:absolute;right:18px;top:18px;font-size:26px;opacity:.9}
+.big.hero{min-height:190px;display:flex;flex-direction:column;justify-content:flex-end;background:url(garage.jpg) center/cover;box-shadow:var(--glow),var(--shadow)}
+.big.hero:before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(11,20,22,.05) 0%,rgba(11,20,22,.55) 45%,rgba(11,20,22,.95) 100%)}
+.big.hero:after{content:"";position:absolute;inset:0;border-radius:22px;border:1px solid rgba(0,160,230,.45);pointer-events:none}
+.big.hero span#homeCount{color:#cfe9f5}
+.big.glass{border:1px solid var(--line);animation-delay:.08s}
+.pill{display:inline-block;align-self:flex-start;font-size:12px;font-weight:600;padding:3px 10px;border-radius:20px;background:var(--accent);color:#fff;margin-bottom:8px;position:relative;box-shadow:0 4px 14px -4px rgba(0,160,230,.8)}
+.foot{text-align:center;color:var(--hint);font-size:12px;margin-top:22px;opacity:.7}
 
 /* каталог */
-.bar{display:flex;gap:8px;margin:0 0 12px;flex-wrap:wrap}
-.bar select,.bar input{flex:1 1 140px;min-width:0;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit}
-.count{color:var(--hint);font-size:13px;margin:-4px 0 10px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
-.lot{background:var(--card);border-radius:var(--r);overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.06);display:flex;flex-direction:column}
-.ph{position:relative;aspect-ratio:4/3;background:var(--bg2);overflow:hidden}
-.ph img{width:100%;height:100%;object-fit:cover;display:block}
-.ph .none{position:absolute;inset:0;display:grid;place-items:center;color:var(--hint);font-size:13px}
-.thumbs{display:grid;grid-template-columns:repeat(10,1fr);gap:3px;padding:3px}
-.thumbs img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:4px;cursor:pointer;opacity:.75;background:var(--bg2)}
-.thumbs img.on{opacity:1;outline:2px solid var(--btn);outline-offset:-2px}
-.info{padding:10px 12px 12px;display:flex;flex-direction:column;gap:2px;flex:1}
-.ttl{font-weight:700;font-size:17px}
+.top{position:sticky;top:0;z-index:5;margin:-14px -14px 12px;padding:12px 14px 10px;background:rgba(11,20,22,.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+.top h2{margin:0 0 10px;display:flex;align-items:center;gap:10px}
+.top h2 img{height:22px}
+.bar{display:flex;gap:8px}
+select,.bar select{flex:1 1 0;min-width:0;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit;appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--hint) 50%),linear-gradient(135deg,var(--hint) 50%,transparent 50%);background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;background-size:5px 5px;background-repeat:no-repeat;padding-right:28px}
+option{background:var(--card);color:var(--text)}
+.count{color:var(--hint);font-size:13px;margin:0 0 10px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.lot{background:linear-gradient(170deg,var(--card2),var(--card));border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow);display:flex;flex-direction:column;border:1px solid var(--line);animation:up .45s both;animation-delay:calc(var(--i,0) * 45ms)}
+
+/* карусель фото */
+.car-ph{position:relative;aspect-ratio:4/3;background:#0a1214}
+.strip{display:flex;height:100%;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;overscroll-behavior-x:contain}
+.strip::-webkit-scrollbar{display:none}
+.strip img{flex:0 0 100%;width:100%;height:100%;object-fit:cover;scroll-snap-align:center;scroll-snap-stop:always;display:block;background:#0a1214}
+.car-ph .none{position:absolute;inset:0;display:grid;place-items:center;color:var(--hint);font-size:13px}
+.dots{position:absolute;left:0;right:0;bottom:8px;display:flex;justify-content:center;gap:5px;pointer-events:none}
+.dots i{width:6px;height:6px;border-radius:3px;background:rgba(255,255,255,.45);transition:all .2s}
+.dots i.on{width:16px;background:#fff}
+.idx{position:absolute;right:10px;top:10px;background:rgba(0,0,0,.5);backdrop-filter:blur(6px);color:#fff;font-size:12px;padding:3px 9px;border-radius:12px}
+.zoomhint{position:absolute;left:10px;top:10px;background:rgba(0,0,0,.5);backdrop-filter:blur(6px);color:#fff;font-size:12px;padding:3px 9px;border-radius:12px}
+.thumbs{display:flex;gap:5px;padding:6px;overflow-x:auto;scrollbar-width:none}
+.thumbs::-webkit-scrollbar{display:none}
+.thumbs img{flex:0 0 58px;height:44px;object-fit:cover;border-radius:8px;cursor:pointer;opacity:.55;background:#0a1214;transition:opacity .2s}
+.thumbs img.on{opacity:1;outline:2px solid var(--accent);outline-offset:-2px}
+
+.info{padding:12px 14px 14px;display:flex;flex-direction:column;gap:3px;flex:1}
+.ttl{font-weight:700;font-size:18px;letter-spacing:.2px}
+.trim{color:var(--hint);font-size:13.5px;margin-bottom:4px}
+.specs{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}
+.chip{font-size:12.5px;padding:4px 9px;border-radius:9px;background:rgba(255,255,255,.06);border:1px solid var(--line)}
 .row{font-size:14px}
 .row .k{color:var(--hint)}
-.price{font-size:20px;font-weight:800;margin-top:8px}
-.note{font-size:11px;line-height:1.3;color:var(--hint);opacity:.85}
-.btn{display:block;width:100%;border:0;border-radius:12px;padding:12px;margin-top:10px;background:var(--btn);color:var(--btn-text);font-weight:600;cursor:pointer;text-align:center}
-.btn.ghost{background:color-mix(in srgb, var(--btn) 12%, transparent);color:var(--btn)}
+.price{font-size:23px;font-weight:800;margin-top:10px;background:linear-gradient(90deg,#fff,var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.note{font-size:11px;line-height:1.35;color:var(--hint);opacity:.8}
+.btn{display:block;width:100%;border:0;border-radius:14px;padding:13px;margin-top:12px;background:linear-gradient(135deg,var(--accent2),var(--accent));color:#fff;font-weight:700;cursor:pointer;text-align:center;box-shadow:var(--glow);transition:transform .15s ease}
+.btn:active{transform:scale(.98)}
+.btn.ghost{background:rgba(0,160,230,.12);color:var(--accent2);box-shadow:none;border:1px solid rgba(0,160,230,.35)}
 .btn:disabled{opacity:.5}
 
 /* карточка */
-#car .ph{border-radius:var(--r) var(--r) 0 0;aspect-ratio:4/3}
-#car .lot{box-shadow:none}
-.nav{position:absolute;top:50%;transform:translateY(-50%);width:38px;height:38px;border-radius:50%;border:0;background:rgba(0,0,0,.35);color:#fff;font-size:20px;cursor:pointer}
-.nav.l{left:8px}.nav.r{right:8px}
-.idx{position:absolute;right:8px;bottom:8px;background:rgba(0,0,0,.45);color:#fff;font-size:12px;padding:2px 7px;border-radius:10px}
-.extra{margin-top:6px;padding-top:8px;border-top:1px solid var(--line)}
-.tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:8px;background:color-mix(in srgb, var(--btn) 12%, transparent);color:var(--btn);margin-top:6px}
+#car .lot{animation:none}
+.extra{margin-top:8px;padding-top:10px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:3px}
+.tag{display:inline-block;align-self:flex-start;font-size:12px;padding:3px 9px;border-radius:9px;background:rgba(0,160,230,.14);color:var(--accent2);margin-top:6px}
+
+/* просмотр фото на весь экран */
+#viewer{position:fixed;inset:0;z-index:50;background:#000;display:none;touch-action:none;user-select:none;-webkit-user-select:none}
+#viewer.on{display:block;animation:fade .2s both}
+#vStage{position:absolute;inset:0;overflow:hidden}
+#vImg{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;transform-origin:0 0;will-change:transform}
+#vImg.anim{transition:transform .22s ease}
+.vbar{position:absolute;left:0;right:0;top:0;display:flex;justify-content:space-between;align-items:center;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;background:linear-gradient(180deg,rgba(0,0,0,.6),transparent);color:#fff;z-index:2}
+.vbar button{border:0;background:rgba(255,255,255,.14);width:38px;height:38px;border-radius:50%;font-size:20px;color:#fff;cursor:pointer}
+.vhelp{position:absolute;left:0;right:0;bottom:calc(14px + env(safe-area-inset-bottom));text-align:center;color:rgba(255,255,255,.6);font-size:12px;z-index:2;pointer-events:none}
 
 /* формы */
-.card{background:var(--card);border-radius:var(--r);padding:14px;margin-bottom:12px}
+.card{background:linear-gradient(170deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:12px;box-shadow:var(--shadow)}
 .f{margin:0 0 12px}
 .f:last-child{margin-bottom:0}
 .f label,.lbl{display:block;font-size:13px;color:var(--hint);margin:0 0 5px}
 .f label i,.lbl i{color:var(--err);font-style:normal}
-.f input,.f select,.f textarea{width:100%;padding:11px 12px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:inherit}
-.f textarea{min-height:64px;resize:vertical}
+.f input,.f select,.f textarea,.inp{width:100%;padding:12px;border-radius:12px;border:1px solid var(--line);background:rgba(0,0,0,.25);color:var(--text);font:inherit;outline:none;transition:border-color .15s}
+.f input:focus,.inp:focus{border-color:var(--accent)}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:6px}
-.seg button{border:1px solid var(--line);background:var(--bg);border-radius:12px;padding:10px 6px;cursor:pointer;font-size:14px}
-.seg button.on{background:var(--btn);border-color:var(--btn);color:var(--btn-text)}
-.bad input,.bad .seg button{border-color:var(--err)}
+.seg button{border:1px solid var(--line);background:rgba(0,0,0,.25);border-radius:12px;padding:11px 6px;cursor:pointer;font-size:14px;transition:all .15s}
+.seg button.on{background:linear-gradient(135deg,var(--accent2),var(--accent));border-color:transparent;color:#fff;box-shadow:var(--glow)}
+.bad input,.bad .seg button,.bad .dd-btn{border-color:var(--err)}
 .hintline{font-size:12px;color:var(--hint);margin-top:5px}
-.carmini{display:flex;gap:10px;align-items:center}
-.carmini img{width:84px;height:63px;object-fit:cover;border-radius:10px;background:var(--bg2)}
+.carmini{display:flex;gap:12px;align-items:center}
+.carmini img{width:92px;height:69px;object-fit:cover;border-radius:12px;background:#0a1214}
 
 /* выбор цветов */
 .dd{position:relative}
-.dd-btn{width:100%;text-align:left;padding:11px 34px 11px 12px;border-radius:12px;border:1px solid var(--line);background:var(--bg);cursor:pointer;min-height:44px}
-.dd-btn:after{content:"▾";position:absolute;right:12px;top:11px;color:var(--hint)}
-.dd-list{display:none;position:absolute;z-index:5;left:0;right:0;top:calc(100% + 4px);background:var(--card);border:1px solid var(--line);border-radius:12px;padding:6px;box-shadow:0 8px 24px rgba(0,0,0,.15);max-height:300px;overflow:auto}
+.dd-btn{width:100%;text-align:left;padding:12px 34px 12px 12px;border-radius:12px;border:1px solid var(--line);background:rgba(0,0,0,.25);cursor:pointer;min-height:46px}
+.dd-btn:after{content:"▾";position:absolute;right:12px;top:12px;color:var(--hint)}
+.dd-list{display:none;position:absolute;z-index:6;left:0;right:0;top:calc(100% + 4px);background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:6px;box-shadow:0 14px 30px rgba(0,0,0,.5);max-height:300px;overflow:auto}
 .dd.open .dd-list{display:block}
 .dd .opt{display:flex;align-items:center;gap:10px;padding:9px 8px;margin:0;border-radius:8px;cursor:pointer;color:var(--text);font-size:15px}
-.opt:active{background:var(--bg2)}
-.dd .opt input{margin:0 0 0 auto;width:18px;height:18px;flex:0 0 auto}
-.dot{display:inline-block;width:18px;height:18px;border-radius:50%;border:1px solid rgba(0,0,0,.18);flex:0 0 auto}
-.dots{display:inline-flex;gap:3px;vertical-align:middle;margin-right:6px}
-.dots .dot{width:12px;height:12px}
+.opt:active{background:rgba(255,255,255,.05)}
+.dd .opt input{margin:0 0 0 auto;width:18px;height:18px;flex:0 0 auto;accent-color:var(--accent)}
+.dot{display:inline-block;width:18px;height:18px;border-radius:50%;border:1px solid rgba(255,255,255,.25);flex:0 0 auto}
+.cdots{display:inline-flex;gap:3px;vertical-align:middle;margin-right:6px}
+.cdots .dot{width:12px;height:12px}
 
-.done{text-align:center;padding-top:30vh}
-.done b{font-size:20px;display:block;margin-bottom:6px}
+.done{text-align:center;padding-top:26vh}
+.done .ok{width:72px;height:72px;border-radius:50%;margin:0 auto 18px;display:grid;place-items:center;font-size:34px;background:linear-gradient(135deg,var(--accent2),var(--accent));box-shadow:var(--glow);animation:up .4s both}
+.done b{font-size:21px;display:block;margin-bottom:6px}
 .empty{text-align:center;color:var(--hint);padding:40px 10px}
+.skel{border-radius:var(--r);height:420px;background:linear-gradient(100deg,var(--card) 40%,var(--card2) 50%,var(--card) 60%) 0 0/200% 100%;animation:sh 1.2s linear infinite;border:1px solid var(--line)}
+@keyframes sh{to{background-position:-200% 0}}
 </style>
 </head>
 <body>
 
 <!-- главная -->
 <section class="view on" id="home">
-  <div class="brand"><div class="logo">DA</div><div><h1>Direct Autoimport</h1></div></div>
-  <p class="sub">Автомобили из Китая, Кореи и Японии под ключ</p>
-  <button class="big primary" onclick="go('list')"><span class="ico">🚗</span><b>В наличии</b><span id="homeCount">Машины в Китае, готовые к покупке</span></button>
-  <button class="big" onclick="openSearch()"><span class="ico">🔎</span><b>Подобрать под заказ</b><span>Найдём машину под ваш запрос и бюджет</span></button>
+  <img class="logoimg" src="logo.png" alt="Прямой Автоимпорт">
+  <p class="tagline">Автомобили из Китая, Кореи и Японии под ключ</p>
+  <button class="big hero" onclick="go('list')"><span class="pill">В наличии</span><b>Каталог автомобилей</b><span id="homeCount">Машины в Китае, готовые к покупке</span></button>
+  <button class="big glass" onclick="openSearch()"><span class="ico">🔎</span><b>Подобрать под заказ</b><span>Найдём машину под ваш запрос и бюджет</span></button>
+  <div class="foot">directautoimport.ru</div>
 </section>
 
 <!-- каталог -->
 <section class="view" id="list">
-  <h2>Авто в наличии</h2>
-  <div class="bar">
-    <select id="fBrand" onchange="render()"><option value="">Все марки</option></select>
-    <select id="fSort" onchange="render()">
-      <option value="price">Сначала дешевле</option>
-      <option value="-price">Сначала дороже</option>
-      <option value="-made">Сначала новее</option>
-      <option value="km">Меньше пробег</option>
-    </select>
+  <div class="top">
+    <h2>Авто в наличии</h2>
+    <div class="bar">
+      <select id="fBrand" onchange="render()"><option value="">Все марки</option></select>
+      <select id="fSort" onchange="render()">
+        <option value="price">Сначала дешевле</option>
+        <option value="-price">Сначала дороже</option>
+        <option value="-made">Сначала новее</option>
+        <option value="km">Меньше пробег</option>
+      </select>
+    </div>
   </div>
   <div class="count" id="count"></div>
-  <div class="grid" id="grid"></div>
+  <div class="grid" id="grid"><div class="skel"></div><div class="skel"></div></div>
 </section>
 
 <!-- карточка машины -->
@@ -137,7 +170,7 @@ h2{font-size:19px;margin:2px 0 12px}
 
 <!-- форма: купить конкретную машину -->
 <section class="view" id="buy">
-  <h2>Оставить заявку на машину</h2>
+  <h2>Заявка на машину</h2>
   <div class="card" id="buyCar"></div>
   <div class="card" id="buyContacts"></div>
   <button class="btn" onclick="submitBuy()">Отправить заявку</button>
@@ -152,7 +185,7 @@ h2{font-size:19px;margin:2px 0 12px}
     <div class="f"><span class="lbl">Годы выпуска</span>
       <div class="two"><select id="sYearFrom"></select><select id="sYearTo"></select></div></div>
     <div class="f"><label>Пробег</label>
-      <select id="sKm"><option value="">Не важно</option><option>до 30 000 км</option><option>до 50 000 км</option><option>до 70 000 км</option><option>до 100 000 км</option></select></div>
+      <select id="sKm" style="width:100%"><option value="">Не важно</option><option>до 30 000 км</option><option>до 50 000 км</option><option>до 70 000 км</option><option>до 100 000 км</option></select></div>
     <div class="f"><span class="lbl">Состояние</span>
       <div class="seg" data-name="cond"><button type="button" data-v="Без окрасов">Без окрасов</button><button type="button" data-v="Допустимы окрасы">Допустимы окрасы</button></div></div>
     <div class="f"><span class="lbl">Цвета</span>
@@ -160,7 +193,7 @@ h2{font-size:19px;margin:2px 0 12px}
         <button type="button" class="dd-btn" id="colorBtn" onclick="toggleDD(event)">Любой</button>
         <div class="dd-list" id="colorList"></div>
       </div>
-      <input id="sColorOther" placeholder="Какой цвет?" style="display:none;margin-top:8px;width:100%;padding:11px 12px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:inherit">
+      <input id="sColorOther" class="inp" placeholder="Какой цвет?" style="display:none;margin-top:8px">
     </div>
     <div class="f"><label>Бюджет</label><input id="sBudget" inputmode="numeric" placeholder="Например, 2 500 000 ₽"></div>
     <div class="f"><label>Город доставки</label><input id="sCity" placeholder="Например, Москва"></div>
@@ -171,7 +204,14 @@ h2{font-size:19px;margin:2px 0 12px}
 </section>
 
 <!-- готово -->
-<section class="view" id="done"><div class="done"><b>Заявка отправлена</b><span class="muted">Менеджер скоро свяжется с вами</span></div></section>
+<section class="view" id="done"><div class="done"><div class="ok">✓</div><b>Заявка отправлена</b><span class="muted">Менеджер скоро свяжется с вами</span></div></section>
+
+<!-- фото на весь экран -->
+<div id="viewer">
+  <div id="vStage"><img id="vImg" alt=""></div>
+  <div class="vbar"><span id="vIdx"></span><button onclick="closeViewer()" aria-label="Закрыть">✕</button></div>
+  <div class="vhelp">Разведите пальцы или нажмите дважды, чтобы приблизить</div>
+</div>
 
 <script>
 // ===== настройки =====
@@ -179,10 +219,14 @@ const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQwOaGZlOwyIaH7
 const IMG_HOST = "https://heyuncar.bebestweb.com/";
 
 const tg = window.Telegram && window.Telegram.WebApp;
-if (tg) { tg.ready(); tg.expand(); }
+if (tg) {
+  tg.ready(); tg.expand();
+  try { tg.setHeaderColor("#0b1416"); tg.setBackgroundColor("#0b1416"); tg.setBottomBarColor && tg.setBottomBarColor("#0b1416"); } catch (e) {}
+}
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const fmt = n => Math.round(n).toLocaleString("ru-RU").replace(/,/g, " ");
+const haptic = t => { try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred(t || "light"); } catch (e) {} };
 
 let CARS = [], META = {cny: "", date: ""}, current = null, stack = ["home"];
 
@@ -193,7 +237,10 @@ function show(id){
   if (tg && tg.BackButton) { stack.length > 1 ? tg.BackButton.show() : tg.BackButton.hide(); }
 }
 function go(id){ stack.push(id); show(id); }
-function back(){ if (stack.length > 1) { stack.pop(); show(stack[stack.length - 1]); } }
+function back(){
+  if ($("viewer").classList.contains("on")) return closeViewer();
+  if (stack.length > 1) { stack.pop(); show(stack[stack.length - 1]); }
+}
 if (tg && tg.BackButton) tg.BackButton.onClick(back);
 
 // ===== данные =====
@@ -210,7 +257,7 @@ function parseCSV(t){
   if (f !== "" || row.length){ row.push(f); rows.push(row); }
   return rows;
 }
-const num = s => { const v = parseFloat(String(s || "").replace(/\s| /g, "").replace(",", ".")); return isNaN(v) ? 0 : v; };
+const num = s => { const v = parseFloat(String(s || "").replace(/\s| /g, "").replace(",", ".")); return isNaN(v) ? 0 : v; };
 function photoList(s){
   if (!s) return [];
   let list;
@@ -243,14 +290,46 @@ async function load(){
 }
 function plural(n, a, b, c){ n %= 100; if (n > 10 && n < 20) return c; n %= 10; return n === 1 ? a : n >= 2 && n <= 4 ? b : c; }
 
+// ===== фото: карусель со свайпом =====
+function carousel(c, big){
+  if (!c.ph.length) return `<div class="car-ph"><div class="none">Фото скоро появятся</div></div>`;
+  const w = big ? 1000 : 640;
+  return `<div class="car-ph">
+      <div class="strip" onscroll="stripScroll(this)">${c.ph.map((u, k) =>
+        `<img src="${img(u, w)}" alt="" ${k ? 'loading="lazy"' : ""} draggable="false" ${big ? `onclick="openViewer(${k})"` : ""}>`).join("")}</div>
+      ${c.ph.length > 1 ? `<div class="dots">${c.ph.map((_, k) => `<i class="${k ? "" : "on"}"></i>`).join("")}</div>` : ""}
+      ${big ? `<span class="idx">1 / ${c.ph.length}</span><span class="zoomhint">🔍 нажмите, чтобы увеличить</span>` : ""}
+    </div>
+    ${big && c.ph.length > 1 ? `<div class="thumbs">${c.ph.map((u, k) => `<img src="${img(u, 160)}" class="${k ? "" : "on"}" loading="lazy" onclick="toSlide(${k})">`).join("")}</div>` : ""}`;
+}
+function stripScroll(s){
+  if (s._raf) return;
+  s._raf = requestAnimationFrame(() => {
+    s._raf = 0;
+    const k = Math.round(s.scrollLeft / s.clientWidth);
+    if (s._k === k) return; s._k = k;
+    const box = s.parentElement;
+    box.querySelectorAll(".dots i").forEach((d, j) => d.classList.toggle("on", j === k));
+    const idx = box.querySelector(".idx"); if (idx) idx.textContent = (k + 1) + " / " + s.children.length;
+    const th = box.nextElementSibling;
+    if (th && th.classList.contains("thumbs")) {
+      th.querySelectorAll("img").forEach((t, j) => t.classList.toggle("on", j === k));
+      const on = th.children[k]; on && on.scrollIntoView({block: "nearest", inline: "center", behavior: "smooth"});
+    }
+    haptic("soft");
+  });
+}
+function toSlide(k){ const s = document.querySelector("#car .strip"); s && s.scrollTo({left: k * s.clientWidth, behavior: "smooth"}); }
+
 // ===== каталог =====
-function specLine(c){
+function specChips(c){
   const parts = [];
-  if (c.type === "Электро") parts.push("электро");
-  else if (c.eng) parts.push(c.eng);
+  if (c.made) parts.push(esc(c.made));
+  parts.push(fmt(c.kmN) + " км");
+  if (c.type === "Электро") parts.push("электро"); else if (c.eng) parts.push(esc(c.eng));
   if (c.hpN) parts.push(c.hpN + " л.с.");
-  if (c.gb) parts.push(c.gb);
-  return parts.join(" · ");
+  if (c.gb) parts.push(esc(c.gb));
+  return `<div class="specs">${parts.map(p => `<span class="chip">${p}</span>`).join("")}</div>`;
 }
 function priceBlock(c){
   if (!c.priceN) return `<div class="price">Цена по запросу</div><div class="note">Рассчитаем стоимость под ключ для этой машины — оставьте заявку.</div>`;
@@ -258,20 +337,12 @@ function priceBlock(c){
     <div class="note">*Цена до Уссурийска с учётом комиссии ВТБ, по курсу юаня ЦБ${META.date ? " на " + esc(META.date) : ""}${META.cny ? " (" + esc(META.cny) + " ₽)" : ""}.</div>
     <div class="note">Расчёт ориентировочный, за точным расчётом обратитесь к менеджеру.</div>`;
 }
-function photoBox(c, i, big){
-  if (!c.ph.length) return `<div class="ph"><div class="none">Фото скоро появятся</div></div>`;
-  return `<div class="ph"><img src="${img(c.ph[i], big ? 1000 : 600)}" alt="" loading="lazy">
-    ${big && c.ph.length > 1 ? `<button class="nav l" onclick="step(-1)">‹</button><button class="nav r" onclick="step(1)">›</button><span class="idx">${i + 1} / ${c.ph.length}</span>` : ""}</div>
-    <div class="thumbs">${c.ph.map((u, k) => `<img src="${img(u, 120)}" class="${k === i ? "on" : ""}" loading="lazy" onclick="${big ? `pick(${k})` : `thumb(this,${k})`}">`).join("")}</div>`;
-}
 function tile(c, idx){
-  return `<div class="lot" data-i="${idx}">${photoBox(c, 0, false)}
+  return `<div class="lot" style="--i:${Math.min(idx, 10)}">${carousel(c, false)}
     <div class="info">
       <div class="ttl">${esc(c.brand)} ${esc(c.model)}</div>
-      <div class="row">${esc(c.trim)}</div>
-      <div class="row"><span class="k">Выпуск:</span> ${esc(c.made)}</div>
-      <div class="row">${esc(specLine(c))}</div>
-      <div class="row"><span class="k">Пробег:</span> ${fmt(c.kmN)} км</div>
+      <div class="trim">${esc(c.trim)}</div>
+      ${specChips(c)}
       <div class="row"><span class="k">Состояние:</span> ${esc(c.cond)}</div>
       ${priceBlock(c)}
       <div style="flex:1"></div>
@@ -291,24 +362,16 @@ function render(){
   $("count").textContent = VIEW.length + " " + plural(VIEW.length, "машина", "машины", "машин");
   $("grid").innerHTML = VIEW.length ? VIEW.map((c, i) => tile(c, i)).join("") : '<div class="empty">Ничего не найдено</div>';
 }
-function thumb(el, k){
-  const lot = el.closest(".lot"), c = VIEW[+lot.dataset.i];
-  lot.querySelector(".ph img").src = img(c.ph[k], 600);
-  lot.querySelectorAll(".thumbs img").forEach((t, j) => t.classList.toggle("on", j === k));
-}
 
 // ===== карточка =====
-let photoI = 0;
-function openCar(idx){ current = VIEW[idx]; photoI = 0; drawCar(); go("car"); }
+function openCar(idx){ current = VIEW[idx]; drawCar(); go("car"); haptic(); }
 function drawCar(){
   const c = current;
-  $("car").innerHTML = `<div class="lot">${photoBox(c, photoI, true)}
+  $("car").innerHTML = `<div class="lot">${carousel(c, true)}
     <div class="info">
-      <div class="ttl" style="font-size:20px">${esc(c.brand)} ${esc(c.model)}</div>
-      <div class="row">${esc(c.trim)}</div>
-      <div class="row"><span class="k">Выпуск:</span> ${esc(c.made)}</div>
-      <div class="row">${esc(specLine(c))}</div>
-      <div class="row"><span class="k">Пробег:</span> ${fmt(c.kmN)} км</div>
+      <div class="ttl" style="font-size:21px">${esc(c.brand)} ${esc(c.model)}</div>
+      <div class="trim">${esc(c.trim)}</div>
+      ${specChips(c)}
       <div class="row"><span class="k">Состояние:</span> ${esc(c.cond)}</div>
       <div class="extra">
         <div class="row"><span class="k">Цвет кузова / салона:</span> ${esc(c.color)}</div>
@@ -319,11 +382,100 @@ function drawCar(){
       <button class="btn" onclick="openBuy()">Хочу эту машину</button>
     </div></div>`;
 }
-function step(d){ const n = current.ph.length; photoI = (photoI + d + n) % n; drawCar(); }
-function pick(k){ photoI = k; drawCar(); }
-let sx = null;
-$("car").addEventListener("touchstart", e => { if (e.target.closest(".ph")) sx = e.touches[0].clientX; }, {passive: true});
-$("car").addEventListener("touchend", e => { if (sx === null) return; const dx = e.changedTouches[0].clientX - sx; sx = null; if (Math.abs(dx) > 40 && current.ph.length > 1) step(dx < 0 ? 1 : -1); });
+
+// ===== просмотр фото с зумом =====
+const V = {i: 0, s: 1, x: 0, y: 0, pts: new Map(), start: null, lastTap: 0, moved: false};
+function openViewer(k){
+  V.i = k; $("viewer").classList.add("on"); vLoad(); haptic();
+  try { tg && tg.disableVerticalSwipes && tg.disableVerticalSwipes(); } catch (e) {}
+}
+function closeViewer(){
+  $("viewer").classList.remove("on");
+  try { tg && tg.enableVerticalSwipes && tg.enableVerticalSwipes(); } catch (e) {}
+  toSlide(V.i);
+}
+function vLoad(){
+  const u = current.ph[V.i];
+  $("vImg").src = img(u, 1000);
+  const hi = new Image(); hi.onload = () => { if (current.ph[V.i] === u) $("vImg").src = hi.src; }; hi.src = img(u, 2000);
+  $("vIdx").textContent = (V.i + 1) + " / " + current.ph.length;
+  vSet(1, 0, 0, false);
+  [V.i - 1, V.i + 1].forEach(j => { if (current.ph[j]) new Image().src = img(current.ph[j], 1000); });
+}
+function vSet(s, x, y, anim){
+  const st = $("vStage"), W = st.clientWidth, H = st.clientHeight;
+  s = Math.min(5, Math.max(1, s));
+  // не даём утащить картинку за края
+  x = Math.min(0, Math.max(W - W * s, x)); y = Math.min(0, Math.max(H - H * s, y));
+  if (s === 1) { x = 0; y = 0; }
+  Object.assign(V, {s, x, y});
+  const im = $("vImg"); im.classList.toggle("anim", !!anim);
+  im.style.transform = `translate(${x}px,${y}px) scale(${s})`;
+}
+function vZoomAt(px, py, ns, anim){
+  // зум относительно точки (px, py) на экране
+  const k = ns / V.s;
+  vSet(ns, px - (px - V.x) * k, py - (py - V.y) * k, anim);
+}
+const st = $("vStage");
+st.addEventListener("pointerdown", e => {
+  st.setPointerCapture(e.pointerId);
+  V.pts.set(e.pointerId, {x: e.clientX, y: e.clientY});
+  V.moved = false;
+  if (V.pts.size === 1) V.start = {x: e.clientX, y: e.clientY, vx: V.x, vy: V.y, t: Date.now()};
+  if (V.pts.size === 2) {
+    const [a, b] = [...V.pts.values()];
+    V.pinch = {d: Math.hypot(a.x - b.x, a.y - b.y), s: V.s, cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, vx: V.x, vy: V.y};
+  }
+});
+st.addEventListener("pointermove", e => {
+  if (!V.pts.has(e.pointerId)) return;
+  V.pts.set(e.pointerId, {x: e.clientX, y: e.clientY});
+  if (V.pts.size === 2 && V.pinch) {
+    const [a, b] = [...V.pts.values()], p = V.pinch;
+    const ns = Math.min(5, Math.max(1, p.s * Math.hypot(a.x - b.x, a.y - b.y) / p.d));
+    const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2, k = ns / p.s;
+    vSet(ns, cx - (p.cx - p.vx) * k, cy - (p.cy - p.vy) * k, false);
+    V.moved = true;
+  } else if (V.pts.size === 1 && V.start) {
+    const dx = e.clientX - V.start.x, dy = e.clientY - V.start.y;
+    if (Math.abs(dx) + Math.abs(dy) > 6) V.moved = true;
+    if (V.s > 1) vSet(V.s, V.start.vx + dx, V.start.vy + dy, false);
+    else $("vImg").style.transform = `translate(${dx}px,0)`;  // тянем к соседнему фото
+  }
+});
+function vUp(e){
+  if (!V.pts.has(e.pointerId)) return;
+  V.pts.delete(e.pointerId);
+  if (V.pts.size === 1) { const [p] = [...V.pts.values()]; V.start = {x: p.x, y: p.y, vx: V.x, vy: V.y, t: Date.now()}; V.pinch = null; return; }
+  if (V.pts.size) return;
+  V.pinch = null;
+  const s0 = V.start; V.start = null;
+  if (!s0) return;
+  const dx = e.clientX - s0.x, dy = e.clientY - s0.y;
+  if (V.s === 1 && V.moved) {
+    const n = current.ph.length;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) && n > 1) { V.i = (V.i + (dx < 0 ? 1 : -1) + n) % n; vLoad(); haptic("soft"); }
+    else if (dy > 120 && Math.abs(dy) > Math.abs(dx)) closeViewer();
+    else vSet(1, 0, 0, true);
+    return;
+  }
+  if (!V.moved) {  // тап: двойной — зум
+    const now = Date.now();
+    if (now - V.lastTap < 300) { V.lastTap = 0; V.s > 1 ? vSet(1, 0, 0, true) : vZoomAt(e.clientX, e.clientY, 2.5, true); haptic(); }
+    else V.lastTap = now;
+  }
+}
+st.addEventListener("pointerup", vUp);
+st.addEventListener("pointercancel", vUp);
+st.addEventListener("wheel", e => { e.preventDefault(); vZoomAt(e.clientX, e.clientY, V.s * (e.deltaY < 0 ? 1.15 : 1 / 1.15), false); }, {passive: false});
+document.addEventListener("keydown", e => {
+  if (!$("viewer").classList.contains("on")) return;
+  const n = current.ph.length;
+  if (e.key === "Escape") closeViewer();
+  if (e.key === "ArrowRight") { V.i = (V.i + 1) % n; vLoad(); }
+  if (e.key === "ArrowLeft") { V.i = (V.i - 1 + n) % n; vLoad(); }
+});
 
 // ===== контакты (общий блок для обеих форм) =====
 const tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
@@ -331,12 +483,40 @@ const tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
 const REF_PROMO = (new URLSearchParams(location.search).get("promo") || "").replace(/[^\w-]/g, "").slice(0, 32);
 function contactsHTML(p){
   return `<div class="f" id="${p}NameF"><label>Как к вам обращаться <i>*</i></label><input id="${p}Name" autocomplete="given-name" value="${esc(tgUser ? tgUser.first_name || "" : "")}"></div>
-    <div class="f" id="${p}PhoneF"><label>Номер телефона <i>*</i></label><input id="${p}Phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+7 ___ ___-__-__"></div>
+    <div class="f" id="${p}PhoneF"><label>Номер телефона <i>*</i></label><input id="${p}Phone" class="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+7 999 123-45-67"></div>
     <div class="f" id="${p}ContactF"><span class="lbl">Как удобнее связаться <i>*</i></span>
       <div class="seg" data-name="${p}contact"><button type="button" data-v="tg">Telegram</button><button type="button" data-v="wa">WhatsApp</button><button type="button" data-v="call">Звонок</button></div>
       <div class="hintline" id="${p}TgHint" style="display:none">Напишем вам здесь, в Telegram${tgUser && tgUser.username ? " — @" + esc(tgUser.username) : ""}</div></div>
     <div class="f"><label>Промокод</label><input id="${p}Promo" placeholder="Если есть" autocapitalize="characters" value="${esc(REF_PROMO)}"></div>`;
 }
+
+// телефон: +7 подставляется сам; 8 или +7 в начале считываются как код страны
+function phoneDigits(v){
+  let d = v.replace(/\D/g, "");
+  if (v.trim().startsWith("+7")) d = d.slice(1);                 // наш префикс
+  if (d.length === 11 && /^[78]/.test(d)) d = d.slice(1);         // вставили 8 999… или 7 999…
+  else if (d.length === 1 && /^[78]/.test(d)) d = "";             // начали набирать с 8 или 7
+  return d.slice(0, 10);
+}
+function phoneFormat(d){
+  let s = "+7";
+  if (d.length) s += " " + d.slice(0, 3);
+  if (d.length > 3) s += " " + d.slice(3, 6);
+  if (d.length > 6) s += "-" + d.slice(6, 8);
+  if (d.length > 8) s += "-" + d.slice(8, 10);
+  return s;
+}
+document.addEventListener("focusin", e => { if (e.target.classList && e.target.classList.contains("phone") && !e.target.value) e.target.value = "+7 "; });
+document.addEventListener("focusout", e => { if (e.target.classList && e.target.classList.contains("phone") && !phoneDigits(e.target.value)) e.target.value = ""; });
+document.addEventListener("input", e => {
+  const el = e.target;
+  if (el.classList && el.classList.contains("phone")) {
+    const d = phoneDigits(el.value);
+    el.value = d ? phoneFormat(d) : "+7 ";
+  }
+  const f = el.closest && el.closest(".f.bad"); f && f.classList.remove("bad");
+});
+
 document.addEventListener("click", e => {
   const b = e.target.closest(".seg button"); if (!b) return;
   const seg = b.parentElement;
@@ -349,20 +529,21 @@ document.addEventListener("click", e => {
 });
 const segVal = name => (document.querySelector(`.seg[data-name="${name}"]`) || {}).dataset?.value || "";
 function readContacts(p){
-  const d = {name: $(p + "Name").value.trim(), phone: $(p + "Phone").value.trim(), contact: segVal(p + "contact"), promo: $(p + "Promo").value.trim()};
+  const digits = phoneDigits($(p + "Phone").value);
+  const d = {name: $(p + "Name").value.trim(), phone: digits.length === 10 ? phoneFormat(digits) : "",
+             contact: segVal(p + "contact"), promo: $(p + "Promo").value.trim()};
   let ok = true;
-  [["Name", d.name], ["Phone", d.phone.replace(/\D/g, "").length >= 10 ? d.phone : ""], ["Contact", d.contact]].forEach(([k, v]) => {
+  [["Name", d.name], ["Phone", d.phone], ["Contact", d.contact]].forEach(([k, v]) => {
     $(p + k + "F").classList.toggle("bad", !v); if (!v) ok = false; });
   if (!ok) { if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("error");
     const bad = document.querySelector(".view.on .bad"); bad && bad.scrollIntoView({behavior: "smooth", block: "center"}); }
   return ok ? d : null;
 }
-document.addEventListener("input", e => { const f = e.target.closest(".f.bad"); f && f.classList.remove("bad"); });
 
 // ===== покупка машины из каталога =====
 function openBuy(){
   const c = current;
-  $("buyCar").innerHTML = `<div class="carmini">${c.ph[0] ? `<img src="${img(c.ph[0], 200)}">` : ""}<div>
+  $("buyCar").innerHTML = `<div class="carmini">${c.ph[0] ? `<img src="${img(c.ph[0], 240)}">` : ""}<div>
     <b>${esc(c.brand)} ${esc(c.model)}</b><div class="muted" style="font-size:13px">${esc(c.made)} · ${fmt(c.kmN)} км${c.priceN ? " · ≈ " + fmt(c.priceN) + " ₽" : ""}</div></div></div>`;
   $("buyContacts").innerHTML = contactsHTML("b");
   go("buy");
@@ -392,7 +573,7 @@ document.addEventListener("click", e => { if (!e.target.closest("#colorDD")) $("
 function colorsChanged(){
   const sel = [...document.querySelectorAll("#colorList input:checked")].map(i => i.value);
   const dots = sel.map(n => `<span class="dot" style="background:${COLORS.find(c => c[0] === n)[1]}"></span>`).join("");
-  $("colorBtn").innerHTML = sel.length ? `<span class="dots">${dots}</span>${esc(sel.join(", "))}` : "Любой";
+  $("colorBtn").innerHTML = sel.length ? `<span class="cdots">${dots}</span>${esc(sel.join(", "))}` : "Любой";
   $("sColorOther").style.display = sel.includes("Другой") ? "block" : "none";
 }
 $("sBudget").addEventListener("input", e => { const d = e.target.value.replace(/\D/g, ""); e.target.value = d ? fmt(+d) + " ₽" : ""; });
