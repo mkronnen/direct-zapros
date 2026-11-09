@@ -5,10 +5,12 @@
   • кнопки: «Каталог и подбор» (мини-приложение), «Этапы работы», «Образец договора», «Отзывы», «Контакты»;
   • заявки из мини-приложения — сразу менеджеру;
   • любое другое сообщение клиента пересылается менеджеру; если менеджер ответит на него (reply)
-    в чате с ботом — бот отправит ответ клиенту.
+    в чате с ботом — бот отправит ответ клиенту;
+  • Артём присылает Excel китайцев — бот обновляет таблицу наличия (sync.py);
+  • каждый день в 12:00 МСК — подборка машин в канал по темам из вкладки «Темы» (posts.py).
 
 Переменные окружения (лежат на сервере в /etc/direct-bot.env, в репозитории их нет):
-  BOT_TOKEN, ADMIN_CHAT_ID, DATA_DIR, [LEADS_CHAT_ID], [APP_URL]
+  BOT_TOKEN, ADMIN_CHAT_ID, DATA_DIR, [LEADS_CHAT_ID], [APP_URL], [CHANNEL_ID]
 """
 import asyncio
 import html
@@ -23,7 +25,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
+from PIL import Image
 
+import posts
 import sync
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
@@ -38,6 +42,10 @@ TG = f"https://api.telegram.org/bot{BOT_TOKEN}"
 TZ = timezone(timedelta(hours=7))           # Красноярск
 DAILY_REPORT_HOUR = 9                       # суточный отчёт в 09:00 по Красноярску
 FORWARDS_PER_HOUR = 30                      # защита от флуда: столько сообщений клиента в час пересылаем
+MSK = timezone(timedelta(hours=3))
+POST_HOUR = 12                              # подборка в канал в 12:00 по Москве
+CHANNEL_ID = os.environ.get("CHANNEL_ID", "@directautoimport")
+BOT_USERNAME = "DirectAutoImport_bot"       # уточняется при запуске (getMe)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("bot")
@@ -131,6 +139,7 @@ CREATE TABLE IF NOT EXISTS leads (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id 
                                   data TEXT, ts REAL);
 CREATE TABLE IF NOT EXISTS events (kind TEXT, ts REAL);
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS posted (lot TEXT, topic INTEGER, ts REAL);
 """)
 db.commit()
 
@@ -187,6 +196,17 @@ async def send_file(method: str, field: str, chat_id: int, path: Path, filename:
     r = await http.post(f"{TG}/{method}", data=data, files={field: (filename, path.read_bytes(), mime)})
     if not r.json().get("ok"):
         raise RuntimeError(f"{method}: {r.text[:200]}")
+
+
+async def send_photo_bytes(chat_id, data: bytes, **extra):
+    form = {"chat_id": str(chat_id)}
+    for k, v in extra.items():
+        form[k] = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+    r = await http.post(f"{TG}/sendPhoto", data=form, files={"photo": ("post.jpg", data, "image/jpeg")})
+    res = r.json()
+    if not res.get("ok"):
+        raise RuntimeError(f"sendPhoto: {r.text[:200]}")
+    return res["result"]
 
 
 # ---------------------------------------------------------------- обновление наличия из Excel
@@ -292,6 +312,15 @@ async def on_callback(cq: dict):
     chat_id = cq.get("message", {}).get("chat", {}).get("id")
     mid = cq.get("message", {}).get("message_id")
     await tg("answerCallbackQuery", callback_query_id=cq["id"])
+    if data.startswith("want:"):
+        await on_want(cq, data[5:])
+        return
+    if data == "menu":
+        await send_welcome(chat_id)
+        return
+    if data.startswith("post:") and chat_id == ADMIN_CHAT_ID:
+        await on_post_button(data, mid)
+        return
     if not data.startswith("sync:") or chat_id != ADMIN_CHAT_ID:
         return
     job = SYNC_PENDING.pop(chat_id, None)
@@ -437,7 +466,7 @@ REF_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 async def save_ref(chat_id: int, user: dict, text: str):
     parts = text.split(maxsplit=1)
     code = parts[1].strip() if len(parts) > 1 else ""
-    if not REF_RE.match(code) or kv_get(f"promo:{chat_id}"):
+    if not REF_RE.match(code) or code.startswith(("lot_", "post_")) or kv_get(f"promo:{chat_id}"):
         return
     kv_set(f"promo:{chat_id}", code)
     event(f"ref:{code}")
@@ -579,9 +608,22 @@ async def on_message(msg: dict):
         return
     text = (msg.get("text") or "").strip()
     if text.startswith("/start"):
+        arg = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) > 1 else ""
+        event("start")
+        if arg.startswith("lot_"):            # нажали машину под подборкой в канале
+            event("post_lot")
+            await show_car(chat_id, arg[4:])
+            return
+        if arg.startswith("post_"):
+            event("post_open")
         await save_ref(chat_id, user, text)
         await send_welcome(chat_id)
-        event("start")
+        return
+    if text.startswith("/post") and chat_id == ADMIN_CHAT_ID:
+        await make_draft(chat_id)
+        return
+    if text.startswith("/autopost") and chat_id == ADMIN_CHAT_ID:
+        await autopost_cmd(chat_id, text)
         return
     if text.startswith("/stats") and chat_id == ADMIN_CHAT_ID:
         await send(chat_id, stats_text(24))
@@ -605,6 +647,242 @@ async def safe_send(chat_id, text):
         log.error("safe_send: %s", e)
 
 
+# ---------------------------------------------------------------- подборки в канал
+
+MODE_TXT = {"auto": "сам публикует в 12:00 МСК", "check": "в 12:00 МСК присылает черновик вам на одобрение",
+            "off": "выключен"}
+_CAT: dict = {"ts": 0, "cars": []}
+
+
+async def get_catalog(max_age: int = 300) -> list[dict]:
+    if time.time() - _CAT["ts"] > max_age or not _CAT["cars"]:
+        _CAT["cars"] = await posts.load_catalog(http)
+        _CAT["ts"] = time.time()
+    return _CAT["cars"]
+
+
+def find_car(cars: list[dict], lot: str) -> dict | None:
+    k = sync.norm(lot)
+    return next((c for c in cars if sync.norm(c["lot"]) == k), None)
+
+
+def posted_map() -> dict[str, float]:
+    return {lot: ts for lot, ts in db.execute("SELECT lot, MAX(ts) FROM posted GROUP BY lot")}
+
+
+async def build_post(start: int | None = None, skip: set[int] = frozenset()) -> dict | None:
+    cars = await get_catalog(max_age=0)
+    topics = posts.parse_topics((await sheet_call({"action": "topics"})).get("topics", []))
+    start = start or int(kv_get("post_next", 1))
+    t, sel = posts.next_topic(topics, cars, posted_map(), start, skip)
+    if not t:
+        return None
+    imgs, ok = [], []
+    for c in sel:   # главное фото (перёд 3/4); если не скачалось — следующее
+        for u in c["ph"][:3]:
+            try:
+                imgs.append(await posts.fetch_image(http, u))
+                ok.append(c)
+                break
+            except Exception as e:
+                log.warning("фото %s: %s", u, e)
+    if not ok:
+        raise RuntimeError(f"не скачалось ни одного фото для темы №{t['n']}")
+    logo = Image.open(HERE / "files" / "logo.png")
+    photo = await asyncio.to_thread(posts.collage, imgs, logo)
+    return {"n": t["n"], "title": t["title"], "lots": [c["lot"] for c in ok], "photo": photo,
+            "caption": posts.caption(t, ok), "markup": posts.buttons(ok, BOT_USERNAME, t["n"])}
+
+
+DRAFT_IMG = DATA_DIR / "draft.jpg"
+
+
+def save_draft(p: dict):
+    DRAFT_IMG.write_bytes(p["photo"])
+    kv_set("post_draft", json.dumps({k: v for k, v in p.items() if k != "photo"}, ensure_ascii=False))
+
+
+def load_draft() -> dict | None:
+    raw = kv_get("post_draft")
+    if not raw or not DRAFT_IMG.exists():
+        return None
+    return dict(json.loads(raw), photo=DRAFT_IMG.read_bytes())
+
+
+DRAFT_BUTTONS = {"inline_keyboard": [[{"text": "✅ Опубликовать в канал", "callback_data": "post:pub"}],
+                                     [{"text": "🔄 Другая тема", "callback_data": "post:next"},
+                                      {"text": "⏭ Пропустить тему", "callback_data": "post:skip"}]]}
+
+
+async def make_draft(chat_id: int, start: int | None = None, skip: set[int] = frozenset()):
+    try:
+        p = await build_post(start, skip)
+    except Exception:
+        await report("не собралась подборка", traceback.format_exc())
+        return
+    if not p:
+        await send(chat_id, "Подборку собрать не из чего: ни под одну включённую тему сейчас нет машин «Готово».")
+        return
+    await send_photo_bytes(chat_id, p["photo"], caption=p["caption"], parse_mode="HTML", reply_markup=p["markup"])
+    save_draft(p)
+    await send(chat_id, f"👆 Черновик подборки — тема №{p['n']} «{p['title']}». Так пост будет выглядеть в канале. "
+                        "Публикуем?", reply_markup=DRAFT_BUTTONS)
+
+
+async def publish(p: dict) -> str:
+    res = await send_photo_bytes(CHANNEL_ID, p["photo"], caption=p["caption"], parse_mode="HTML",
+                                 reply_markup=p["markup"])
+    now = time.time()
+    db.executemany("INSERT INTO posted VALUES (?, ?, ?)", [(lot, p["n"], now) for lot in p["lots"]])
+    db.commit()
+    kv_set("post_next", p["n"] + 1)
+    kv_set("post_draft", "")
+    event("post_pub")
+    chat = res.get("chat", {})
+    return (f"https://t.me/{chat['username']}/{res['message_id']}" if chat.get("username") else "")
+
+
+async def on_post_button(data: str, mid: int):
+    await tg("editMessageReplyMarkup", chat_id=ADMIN_CHAT_ID, message_id=mid, reply_markup={"inline_keyboard": []})
+    p = load_draft()
+    if not p:
+        await send(ADMIN_CHAT_ID, "Этот черновик уже неактуален. Новый — командой /post.")
+        return
+    if data == "post:pub":
+        try:
+            link = await publish(p)
+        except Exception:
+            await report("не опубликовалась подборка", traceback.format_exc())
+            return
+        await send(ADMIN_CHAT_ID, f"📢 Подборка «{p['title']}» опубликована. {link}")
+    elif data == "post:next":
+        await make_draft(ADMIN_CHAT_ID, start=p["n"] + 1, skip={p["n"]})
+    elif data == "post:skip":
+        kv_set("post_next", p["n"] + 1)
+        kv_set("post_draft", "")
+        await send(ADMIN_CHAT_ID, f"Тема «{p['title']}» пропущена. Завтра — следующая по списку.")
+
+
+async def autopost_cmd(chat_id: int, text: str):
+    arg = text.split(maxsplit=1)[1].strip().lower() if len(text.split()) > 1 else ""
+    alias = {"auto": "auto", "авто": "auto", "check": "check", "проверка": "check", "off": "off", "выкл": "off"}
+    if arg in alias:
+        kv_set("post_mode", alias[arg])
+    mode = kv_get("post_mode", "check")
+    last = db.execute("SELECT topic, MAX(ts) FROM posted").fetchone()
+    when = datetime.fromtimestamp(last[1], MSK).strftime("%d.%m %H:%M") if last and last[1] else "ещё не было"
+    await send(chat_id, f"📢 Автопостинг: {MODE_TXT.get(mode, mode)}.\n"
+                        f"Следующая тема: №{kv_get('post_next', 1)} (по порядку из вкладки «Темы»).\n"
+                        f"Последняя подборка: {when}.\n\n"
+                        "Команды:\n/autopost auto — публиковать самому без проверки\n"
+                        "/autopost check — сначала присылать черновик мне\n/autopost off — выключить\n"
+                        "/post — собрать черновик прямо сейчас")
+
+
+async def autopost_loop():
+    while True:
+        now = datetime.now(MSK)
+        today = now.strftime("%Y-%m-%d")
+        # окно до 18:00 — если бот был выключен в 12:00, подборка выйдет, когда он поднимется, но не ночью
+        if POST_HOUR <= now.hour < 18 and kv_get("post_day") != today:
+            kv_set("post_day", today)
+            mode = kv_get("post_mode", "check")
+            try:
+                if mode == "check":
+                    await make_draft(ADMIN_CHAT_ID)
+                elif mode == "auto":
+                    p = await build_post()
+                    if p:
+                        link = await publish(p)
+                        await send(ADMIN_CHAT_ID, f"📢 Вышла подборка «{p['title']}». {link}")
+            except Exception:
+                await report("сбой автопостинга", traceback.format_exc())
+        await asyncio.sleep(60)
+
+
+# ---------------------------------------------------------------- машина из подборки → клиенту
+
+async def send_album(chat_id: int, urls: list[str], caption: str):
+    urls = urls[:10]
+    media = [dict({"type": "photo", "media": u + "?x-oss-process=image/resize,w_1280"},
+                  **({"caption": caption, "parse_mode": "HTML"} if i == 0 else {})) for i, u in enumerate(urls)]
+    try:
+        await tg("sendMediaGroup", chat_id=chat_id, media=media)
+        return
+    except Exception as e:
+        log.warning("альбом по ссылкам не ушёл: %s", e)
+    files = {}
+    for i, u in enumerate(urls):   # Telegram не смог скачать сам — качаем и загружаем
+        try:
+            r = await http.get(u + "?x-oss-process=image/resize,w_1280", follow_redirects=True)
+            r.raise_for_status()
+            files[f"p{i}"] = (f"p{i}.jpg", r.content, "image/jpeg")
+        except Exception:
+            pass
+    if files:
+        media = [dict({"type": "photo", "media": f"attach://{k}"},
+                      **({"caption": caption, "parse_mode": "HTML"} if j == 0 else {})) for j, k in enumerate(files)]
+        r = await http.post(f"{TG}/sendMediaGroup", data={"chat_id": str(chat_id), "media": json.dumps(media)},
+                            files=files)
+        if r.json().get("ok"):
+            return
+    await send(chat_id, caption, parse_mode="HTML")
+
+
+async def show_car(chat_id: int, lot: str):
+    try:
+        c = find_car(await get_catalog(), lot)
+    except Exception:
+        await report("не загрузился каталог", traceback.format_exc(), chat_id)
+        c = None
+    if not c:
+        await send(chat_id, "Эта машина уже продана или забронирована 😔 Посмотрите другие в каталоге — кнопка "
+                            "«🚗 Каталог и подбор» внизу.", reply_markup=kb(chat_id))
+        return
+    await send_album(chat_id, c["ph"], posts.card(c))
+    await send(chat_id, "Понравилась? Нажмите «Хочу эту машину» — менеджер напишет вам здесь, в Telegram, "
+                        "ответит на вопросы и сделает точный расчёт.",
+               reply_markup={"inline_keyboard": [[{"text": "✍️ Хочу эту машину", "callback_data": f"want:{c['lot']}"}],
+                                                 [{"text": "🚗 Весь каталог и подбор", "callback_data": "menu"}]]})
+
+
+async def on_want(cq: dict, lot: str):
+    chat_id = cq["message"]["chat"]["id"]
+    user = remember_user({"from": cq.get("from", {}), "chat": {"id": chat_id}})
+    if time.time() - float(kv_get(f"want:{chat_id}:{lot}", 0) or 0) < 3600:
+        await send(chat_id, "Заявка на эту машину уже у менеджера — он скоро напишет.", reply_markup=kb(chat_id))
+        return
+    kv_set(f"want:{chat_id}:{lot}", time.time())
+    try:
+        c = find_car(await get_catalog(), lot) or {"lot": lot}
+    except Exception:
+        c = {"lot": lot}
+    cur = db.execute("INSERT INTO leads (chat_id, type, data, ts) VALUES (?, ?, ?, ?)",
+                     (chat_id, "подборка", json.dumps({"lot": lot}, ensure_ascii=False), time.time()))
+    db.commit()
+    lead_id = cur.lastrowid
+    event("want")
+    e = html.escape
+    lines = [f"🚗 Хочет машину из подборки в канале — №{lead_id}", f"Клиент в Telegram: {user_link(chat_id, user)}", ""]
+    if c.get("brand"):
+        lines.append(f"<b>{e(c['brand'])} {e(c['model'])}</b>")
+    lines.append(f"Лот: {e(lot)}")
+    for k, label in [("trim", "Комплектация"), ("made", "Выпуск"), ("km", "Пробег, км"), ("cond", "Состояние")]:
+        if c.get(k):
+            lines.append(f"{label}: {e(c[k])}")
+    if c.get("priceN"):
+        lines.append(f"Цена в канале: ≈ {posts.fmt(c['priceN'])} ₽")
+    lines += ["", "Связь: Telegram" + (f" (@{e(user['username'])})" if user.get("username") else ""),
+              promo_line(chat_id, None), "", "↩️ Ответьте на это сообщение — ответ уйдёт клиенту в бот."]
+    if chat_id == ADMIN_CHAT_ID:
+        lines.insert(0, "🧪 ТЕСТ")
+    sent = await send(LEADS_CHAT_ID, "\n".join(lines), parse_mode="HTML")
+    kv_set(f"relay:{LEADS_CHAT_ID}:{sent['message_id']}", chat_id)
+    await send(chat_id, f"Заявка №{lead_id} отправлена менеджеру — он напишет вам здесь, в Telegram, в ближайшее время.",
+               reply_markup=kb(chat_id))
+    save_msg(chat_id, "system", f"заявка №{lead_id} (подборка, лот {lot})")
+
+
 # ---------------------------------------------------------------- отчёты
 
 def stats_text(hours: int) -> str:
@@ -616,6 +894,7 @@ def stats_text(hours: int) -> str:
             f"Сообщений переслано вам: {cnt('forward')}, ваших ответов клиентам: {cnt('relay')}\n"
             f"Открыли: этапы {cnt('steps')}, договор {cnt('contract')}, отзывы {cnt('reviews')}, "
             f"контакты {cnt('contacts')}, канал {cnt('channel')}, чат {cnt('chat')}\n"
+            f"Из подборок в канале: открыли машин {cnt('post_lot')}, «Хочу эту машину» {cnt('want')}\n"
             f"Ошибок: {cnt('error')}"
             + refs_text(since))
 
@@ -669,7 +948,9 @@ def version() -> str:
 # ---------------------------------------------------------------- главный цикл
 
 async def main():
+    global BOT_USERNAME
     me = await tg("getMe")
+    BOT_USERNAME = me["username"]
     await tg("deleteWebhook", drop_pending_updates=False)
     await tg("setMyCommands", commands=[{"command": "start", "description": "Главное меню"}])
     sheet = ""
@@ -678,8 +959,16 @@ async def main():
         sheet = f" Таблица на связи: {res.get('cars', '?')} машин."
     except Exception as e:
         sheet = f" ⚠️ Таблица не отвечает: {str(e)[:200]}"
+    try:
+        cm = await tg("getChatMember", chat_id=CHANNEL_ID, user_id=me["id"])
+        ok = cm.get("status") == "creator" or (cm.get("status") == "administrator" and cm.get("can_post_messages"))
+        sheet += " Канал: можно постить ✅" if ok else " ⚠️ Канал: бот не админ с правом публикации."
+    except Exception as e:
+        sheet += f" ⚠️ Канал недоступен: {str(e)[:150]}"
+    sheet += f" Автопостинг: {MODE_TXT.get(kv_get('post_mode', 'check'), '?')}."
     await send(ADMIN_CHAT_ID, f"🤖 Бот @{me['username']} запущен, версия {version()}.{sheet}")
     asyncio.create_task(daily_report_loop())
+    asyncio.create_task(autopost_loop())
     offset = int(kv_get("offset", 0))
     fails = 0
     while True:
