@@ -29,6 +29,7 @@ from PIL import Image
 
 import posts
 import sync
+import web
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 ADMIN_CHAT_ID = int(os.environ["ADMIN_CHAT_ID"])
@@ -1034,6 +1035,10 @@ async def main():
     await send(ADMIN_CHAT_ID, f"🤖 Бот @{me['username']} запущен, версия {version()}.{sheet}")
     asyncio.create_task(daily_report_loop())
     asyncio.create_task(autopost_loop())
+    try:   # веб-сервер мини-приложения (за Caddy): каталог и фото с нашего сервера
+        await web.Site(DATA_DIR, http).start(report)
+    except Exception:
+        await report("не запустился веб-сервер приложения", traceback.format_exc())
     offset = int(kv_get("offset", 0))
     fails = 0
     while True:
