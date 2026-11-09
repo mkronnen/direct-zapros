@@ -356,7 +356,7 @@ async def on_webapp(chat_id: int, user: dict, raw: str):
             if c.get(k):
                 lines.append(f"{label}: {e(c[k])}")
     else:
-        for k, label in [("car", "Марка/модель"), ("years", "Годы"), ("km", "Пробег"), ("cond", "Состояние"),
+        for k, label in [("car", "Марка/модель"), ("years", "Годы"), ("km", "Пробег"), ("drive", "Привод"), ("cond", "Состояние"),
                          ("colors", "Цвета"), ("budget", "Бюджет"), ("city", "Город доставки")]:
             if d.get(k):
                 lines.append(f"{label}: {e(d[k])}")
