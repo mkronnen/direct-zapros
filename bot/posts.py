@@ -16,12 +16,38 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 CSV_URL = ("https://docs.google.com/spreadsheets/d/e/2PACX-1vQwOaGZlOwyIaH7SphCWmWXkNC1decOw_dpAZcrWMlW8Qqn1L05CPuX2FSN7KvX9rej2Sc7W9Lb1mZi"
            "/pub?gid=2075215146&single=true&output=csv")
 IMG_HOST = "https://heyuncar.bebestweb.com/"
+META = {"cny": "", "date": ""}   # курс юаня ЦБ и его дата — из первой строки каталога
 MAX_CARS = 3
 REPEAT_DAYS = 30          # машину не повторяем в подборках месяц…
 REPEAT_DAYS_MIN = 10      # …но если иначе тема пустая — можно через 10 дней
-NUM = ["1️⃣", "2️⃣", "3️⃣"]
+# Эмодзи поста по слотам: номер 1, 2, 3, окрас, цена. Артём может заменить их своими (в т.ч. премиум) командой /emoji.
+SLOTS = ["номер 1", "номер 2", "номер 3", "окрас", "цена"]
+DEFAULT_EMOJI = [{"t": "1️⃣"}, {"t": "2️⃣"}, {"t": "3️⃣"}, {"t": "🎨"}, {"t": "💰"}]
+NO_EMOJI = [{"t": "1."}, {"t": "2."}, {"t": "3."}, {"t": ""}, {"t": ""}]
 BG = (11, 20, 22)
 ACCENT = (0, 160, 230)
+
+
+def em(e: dict, custom: bool = True) -> str:
+    """Эмодзи для HTML-подписи: премиум — тегом tg-emoji (с обычным эмодзи внутри на случай, если не пропустят)."""
+    if custom and e.get("id"):
+        return f'<tg-emoji emoji-id="{e["id"]}">{e["t"]}</tg-emoji>'
+    return e["t"]
+
+
+def parse_emoji_message(text: str, entities: list[dict]) -> list[dict]:
+    """Эмодзи из сообщения Артёма. Премиум-эмодзи приходят как entity custom_emoji (смещения в UTF-16),
+    их можно слать подряд без пробелов; обычные — через пробел."""
+    u16 = text.encode("utf-16-le")
+    sub = lambda a, b: u16[a * 2:b * 2].decode("utf-16-le")
+    ents = sorted((e for e in entities or [] if e.get("type") == "custom_emoji"), key=lambda e: e["offset"])
+    out, pos = [], 0
+    for e in ents + [{"offset": len(u16) // 2, "length": 0}]:
+        out += [{"t": tok} for tok in sub(pos, e["offset"]).split()]
+        if e.get("custom_emoji_id"):
+            out.append({"t": sub(e["offset"], e["offset"] + e["length"]), "id": e["custom_emoji_id"]})
+        pos = e["offset"] + e["length"]
+    return out
 
 
 # ---------------------------------------------------------------- данные
@@ -58,6 +84,9 @@ async def load_catalog(http: httpx.AsyncClient) -> list[dict]:
     r.raise_for_status()
     r.encoding = "utf-8"
     rows = list(csv.DictReader(io.StringIO(r.text)))
+    if rows:
+        META["cny"] = (rows[0].get("cny") or "").strip()
+        META["date"] = (rows[0].get("date") or "").strip()
     cars = []
     for o in rows:
         o = {k.strip(): (v or "").strip() for k, v in o.items() if k}
@@ -120,11 +149,13 @@ def matches(c: dict, t: dict) -> bool:
 
 def sort_key(t: dict):
     s = t["sort"]
+    if "дорож" in s:
+        return lambda c: (-c["priceN"], c["kmN"])
     if "свеж" in s:
         return lambda c: (-c["ym"][0], -c["ym"][1], c["priceN"])
     if "пробег" in s:
         return lambda c: (c["kmN"], c["priceN"])
-    return lambda c: (c["priceN"], c["kmN"])
+    return lambda c: (c["priceN"], c["kmN"])   # «дешевле» и «разброс по цене»
 
 
 def pick(cars: list[dict], t: dict, posted: dict[str, float], now: float | None = None) -> list[dict]:
@@ -133,17 +164,19 @@ def pick(cars: list[dict], t: dict, posted: dict[str, float], now: float | None 
     cand = sorted((c for c in cars if matches(c, t)), key=sort_key(t))
     for days in (REPEAT_DAYS, REPEAT_DAYS_MIN):
         pool = [c for c in cand if now - posted.get(c["lot"], 0) > days * 86400]
-        res, seen = [], set()
+        uniq, seen = [], set()   # разные модели
         for c in pool:
             k = (c["brand"].lower(), c["model"].lower())
-            if k in seen:
-                continue
-            seen.add(k)
-            res.append(c)
-            if len(res) == MAX_CARS:
-                break
-        if res:
-            return res
+            if k not in seen:
+                seen.add(k)
+                uniq.append(c)
+        if not uniq:
+            continue
+        if "разброс" in t["sort"] and len(uniq) > MAX_CARS:
+            # по всему ценовому диапазону темы: самая доступная, середина, самая дорогая
+            idx = sorted({round(i * (len(uniq) - 1) / (MAX_CARS - 1)) for i in range(MAX_CARS)})
+            return [uniq[i] for i in idx]
+        return uniq[:MAX_CARS]
     return []
 
 
@@ -176,7 +209,7 @@ def short_cond(cond: str) -> str:
     return cond[:1].lower() + cond[1:] if cond else ""
 
 
-def car_lines(i: int, c: dict, with_cond: bool = True) -> str:
+def car_lines(i: int, c: dict, with_cond: bool = True, emoji: list[dict] = DEFAULT_EMOJI, custom: bool = True) -> str:
     trim = c.get("trim", "")
     if len(trim) > 45:
         trim = trim[:44].rstrip() + "…"
@@ -188,31 +221,42 @@ def car_lines(i: int, c: dict, with_cond: bool = True) -> str:
         specs.append(c["gb"])
     if "полн" in c.get("drive", "").lower():
         specs.append("полный привод")
-    s = f"{NUM[i]} <b>{esc(c['brand'])} {esc(c['model'])}</b> {esc(trim)}\n{esc(' · '.join(x for x in specs if x))}\n"
+    pre = lambda k: (em(emoji[k], custom) + " ") if emoji[k]["t"] else ""
+    s = f"{pre(i)}<b>{esc(c['brand'])} {esc(c['model'])}</b> {esc(trim)}\n{esc(' · '.join(x for x in specs if x))}\n"
     if with_cond and c.get("cond"):
-        s += f"🎨 {esc(short_cond(c['cond']))}\n"
-    s += f"💰 <b>≈ {fmt(c['priceN'])} ₽</b>\n"
+        s += f"{pre(3)}{esc(short_cond(c['cond']))}\n"
+    s += f"{pre(4)}<b>≈ {fmt(c['priceN'])} ₽</b>\n"
     return s
 
 
-FOOTER = ("<i>Цена — ориентировочно до Уссурийска, с растаможкой, по курсу ЦБ. "
-          "Нажмите на машину под постом — бот покажет все фото и примет заявку.</i>")
+def footer() -> str:
+    rate = ""
+    if META["date"]:
+        cny = num(META["cny"])
+        rate = f" на {META['date'][:5]}" + (f" ({cny:.2f} ₽ за юань)".replace(".", ",") if cny else "")
+    return (f"<i>Цена — ориентировочно до Уссурийска, с растаможкой, по курсу ЦБ{esc(rate)}. "
+            "Нажмите на машину под постом — бот покажет все фото и примет заявку.</i>")
 
 
-def caption(t: dict, cars: list[dict]) -> str:
+def visible_len(html_text: str) -> int:
+    import html as h
+    return len(h.unescape(re.sub(r"<[^>]+>", "", html_text)).encode("utf-16-le")) // 2
+
+
+def caption(t: dict, cars: list[dict], emoji: list[dict] = DEFAULT_EMOJI, custom: bool = True) -> str:
     for with_cond in (True, False):
         txt = f"<b>{esc(t['title'])}</b>\n"
         if t["intro"]:
             txt += esc(t["intro"]) + "\n"
-        txt += "\n" + "\n".join(car_lines(i, c, with_cond) for i, c in enumerate(cars)) + "\n" + FOOTER
-        if len(txt) <= 1024:   # лимит подписи к фото в Telegram
+        txt += "\n" + "\n".join(car_lines(i, c, with_cond, emoji, custom) for i, c in enumerate(cars)) + "\n" + footer()
+        if visible_len(txt) <= 1024:   # лимит подписи к фото в Telegram
             return txt
-    return txt[:1020] + "…"
+    return txt
 
 
 def buttons(cars: list[dict], bot_username: str, topic_n: int) -> dict:
     base = f"https://t.me/{bot_username}?start="
-    rows = [[{"text": f"{NUM[i]} {c['brand']} {c['model']} — подробнее", "url": f"{base}lot_{c['lot']}"}]
+    rows = [[{"text": f"{i + 1}. {c['brand']} {c['model']} — подробнее", "url": f"{base}lot_{c['lot']}"}]
             for i, c in enumerate(cars)]
     rows.append([{"text": "🚗 Весь каталог и подбор", "url": f"{base}post_{topic_n}"}])
     return {"inline_keyboard": rows}

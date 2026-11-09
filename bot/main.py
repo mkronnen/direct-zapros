@@ -622,6 +622,13 @@ async def on_message(msg: dict):
     if text.startswith("/post") and chat_id == ADMIN_CHAT_ID:
         await make_draft(chat_id)
         return
+    if text.startswith("/emoji") and chat_id == ADMIN_CHAT_ID:
+        await emoji_cmd(chat_id, text)
+        return
+    if (chat_id == ADMIN_CHAT_ID and text and not text.startswith("/") and kv_get("await_emoji") == "1"
+            and text not in (BTN_APP, BTN_STEPS, BTN_CONTRACT, BTN_REVIEWS, BTN_CONTACTS, BTN_CHANNEL, BTN_CHAT)):
+        await emoji_save(chat_id, msg)
+        return
     if text.startswith("/autopost") and chat_id == ADMIN_CHAT_ID:
         await autopost_cmd(chat_id, text)
         return
@@ -690,8 +697,53 @@ async def build_post(start: int | None = None, skip: set[int] = frozenset()) -> 
         raise RuntimeError(f"не скачалось ни одного фото для темы №{t['n']}")
     logo = Image.open(HERE / "files" / "logo.png")
     photo = await asyncio.to_thread(posts.collage, imgs, logo)
+    emj = post_emoji()
     return {"n": t["n"], "title": t["title"], "lots": [c["lot"] for c in ok], "photo": photo,
-            "caption": posts.caption(t, ok), "markup": posts.buttons(ok, BOT_USERNAME, t["n"])}
+            "caption": posts.caption(t, ok, emj), "caption_plain": posts.caption(t, ok, emj, custom=False),
+            "custom": any(e.get("id") for e in emj), "markup": posts.buttons(ok, BOT_USERNAME, t["n"])}
+
+
+def post_emoji() -> list[dict]:
+    raw = kv_get("post_emoji")
+    if raw == "none":
+        return posts.NO_EMOJI
+    try:
+        e = json.loads(raw) if raw else None
+        return e if isinstance(e, list) and len(e) == len(posts.SLOTS) else posts.DEFAULT_EMOJI
+    except Exception:
+        return posts.DEFAULT_EMOJI
+
+
+async def emoji_cmd(chat_id: int, text: str):
+    arg = text.split(maxsplit=1)[1].strip().lower() if len(text.split()) > 1 else ""
+    if arg in ("нет", "без", "off", "none"):
+        kv_set("post_emoji", "none")
+        await send(chat_id, "Ок, подборки будут без эмодзи: машины пронумерую «1. 2. 3.».")
+        return
+    if arg in ("сброс", "reset", "стандарт"):
+        kv_set("post_emoji", "")
+        await send(chat_id, "Вернул стандартные эмодзи: 1️⃣ 2️⃣ 3️⃣ 🎨 💰")
+        return
+    kv_set("await_emoji", "1")
+    await send(chat_id, "Пришлите одним сообщением 5 эмодзи через пробел, по порядку:\n"
+                        + "\n".join(f"{i + 1}) {s}" for i, s in enumerate(posts.SLOTS))
+                        + "\n\nМожно премиум-эмодзи. Без эмодзи — /emoji нет, вернуть стандартные — /emoji сброс.")
+
+
+async def emoji_save(chat_id: int, msg: dict) -> bool:
+    kv_set("await_emoji", "")
+    items = posts.parse_emoji_message(msg.get("text", ""), msg.get("entities", []))
+    if len(items) != len(posts.SLOTS):
+        await send(chat_id, f"Нужно ровно {len(posts.SLOTS)} эмодзи через пробел, а пришло {len(items)}. "
+                            "Попробуйте ещё раз: /emoji")
+        return True
+    kv_set("post_emoji", json.dumps(items, ensure_ascii=False))
+    prem = sum(1 for e in items if e.get("id"))
+    lines = "\n".join(f"{posts.em(e)} — {s}" for e, s in zip(items, posts.SLOTS))
+    await send(chat_id, f"Сохранил:\n{lines}" + (f"\n\nПремиум-эмодзи: {prem}. Если Telegram не пропустит их в канал, "
+                                                  "бот опубликует с обычными и напишет вам." if prem else ""),
+               parse_mode="HTML")
+    return True
 
 
 DRAFT_IMG = DATA_DIR / "draft.jpg"
@@ -730,8 +782,21 @@ async def make_draft(chat_id: int, start: int | None = None, skip: set[int] = fr
 
 
 async def publish(p: dict) -> str:
-    res = await send_photo_bytes(CHANNEL_ID, p["photo"], caption=p["caption"], parse_mode="HTML",
-                                 reply_markup=p["markup"])
+    plain_note = ""
+    try:
+        res = await send_photo_bytes(CHANNEL_ID, p["photo"], caption=p["caption"], parse_mode="HTML",
+                                     reply_markup=p["markup"])
+        if p.get("custom") and not any(e.get("type") == "custom_emoji" for e in res.get("caption_entities", [])):
+            plain_note = "Telegram показал в канале обычные эмодзи вместо премиум."
+    except Exception as e:
+        if not p.get("custom"):
+            raise
+        plain_note = f"Премиум-эмодзи в канал не пропустили ({str(e)[:120]}), опубликовал с обычными."
+        res = await send_photo_bytes(CHANNEL_ID, p["photo"], caption=p.get("caption_plain", p["caption"]),
+                                     parse_mode="HTML", reply_markup=p["markup"])
+    if plain_note and kv_get("emoji_warned") != "1":
+        kv_set("emoji_warned", "1")
+        await send(ADMIN_CHAT_ID, "ℹ️ " + plain_note)
     now = time.time()
     db.executemany("INSERT INTO posted VALUES (?, ?, ?)", [(lot, p["n"], now) for lot in p["lots"]])
     db.commit()
@@ -776,7 +841,7 @@ async def autopost_cmd(chat_id: int, text: str):
                         f"Последняя подборка: {when}.\n\n"
                         "Команды:\n/autopost auto — публиковать самому без проверки\n"
                         "/autopost check — сначала присылать черновик мне\n/autopost off — выключить\n"
-                        "/post — собрать черновик прямо сейчас")
+                        "/post — собрать черновик прямо сейчас\n/emoji — свои эмодзи для подборок")
 
 
 async def autopost_loop():
