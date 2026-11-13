@@ -164,7 +164,8 @@ def sort_key(t: dict):
 def pick(cars: list[dict], t: dict, posted: dict[str, float], now: float | None = None) -> list[dict]:
     """posted: лот → когда последний раз был в подборке."""
     now = now or time.time()
-    cand = sorted((c for c in cars if matches(c, t)), key=sort_key(t))
+    # всегда самые дешёвые подходящие машины (по одной самой дешёвой на модель) — подборка должна быть конкурентной
+    cand = sorted((c for c in cars if matches(c, t)), key=lambda c: (c["priceN"], c["kmN"]))
     for days in (REPEAT_DAYS, REPEAT_DAYS_MIN):
         pool = [c for c in cand if now - posted.get(c["lot"], 0) > days * 86400]
         uniq, seen = [], set()   # разные модели
@@ -175,10 +176,6 @@ def pick(cars: list[dict], t: dict, posted: dict[str, float], now: float | None 
                 uniq.append(c)
         if not uniq:
             continue
-        if "разброс" in t["sort"] and len(uniq) > MAX_CARS:
-            # по всему ценовому диапазону темы: самая доступная, середина, самая дорогая
-            idx = sorted({round(i * (len(uniq) - 1) / (MAX_CARS - 1)) for i in range(MAX_CARS)})
-            return [uniq[i] for i in idx]
         return uniq[:MAX_CARS]
     return []
 
