@@ -1,6 +1,6 @@
-# Мини-приложение и его данные с нашего сервера (HTTPS-сертификаты Caddy получает сам).
-# app.directautoimport.ru — основной адрес (A-запись в панели хостинга REG.RU), sslip.io — запасной.
-app.directautoimport.ru, 195-133-20-31.sslip.io {
+# Шаблон. Сервер сам подставляет вместо SITE_ADDRESS адрес вида 1-2-3-4.sslip.io по своему IP (см. update.sh)
+# и кладёт готовый конфиг в /etc/caddy/Caddyfile. HTTPS-сертификат Caddy получает сам.
+SITE_ADDRESS {
 	encode gzip
 	reverse_proxy 127.0.0.1:8088
 }

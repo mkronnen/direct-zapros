@@ -46,13 +46,24 @@ WantedBy=multi-user.target
 UNIT
     systemctl daemon-reload
   fi
-  if ! cmp -s app/bot/deploy/Caddyfile /etc/caddy/Caddyfile; then
-    cp app/bot/deploy/Caddyfile /etc/caddy/Caddyfile
+  # адрес сайта по собственному IP сервера: 1.2.3.4 -> 1-2-3-4.sslip.io (работает при любом переезде без DNS)
+  IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')
+  [ -n "$IP" ] || IP=$(hostname -I | awk '{print $1}')
+  SITE="$(echo "$IP" | tr . -).sslip.io"
+  echo "https://$SITE/" > /opt/bot/data/public_url.new
+  if ! cmp -s /opt/bot/data/public_url.new /opt/bot/data/public_url; then
+    mv /opt/bot/data/public_url.new /opt/bot/data/public_url; chown bot:bot /opt/bot/data/public_url
+  else
+    rm -f /opt/bot/data/public_url.new
+  fi
+  sed "s/SITE_ADDRESS/$SITE/" app/bot/deploy/Caddyfile > /tmp/Caddyfile.new
+  if ! cmp -s /tmp/Caddyfile.new /etc/caddy/Caddyfile; then
+    cp /tmp/Caddyfile.new /etc/caddy/Caddyfile
     if command -v ufw > /dev/null && ufw status | grep -q "Status: active"; then ufw allow 80/tcp; ufw allow 443/tcp; fi
     if systemctl is-active -q caddy; then systemctl reload caddy; else systemctl enable --now caddy; fi
     sleep 15
     if systemctl is-active -q caddy; then
-      tg "🌐 Веб-сервер приложения запущен: https://$(head -n 3 /etc/caddy/Caddyfile | grep -o '^[^ #{]*\.[a-z]*' | head -1)/"
+      tg "🌐 Веб-сервер приложения запущен: https://$SITE/"
     else
       tg "⚠️ Caddy не запустился
 $(journalctl -u caddy -n 15 --no-pager -o cat | tail -c 1200)"
