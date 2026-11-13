@@ -37,7 +37,22 @@ ADMIN_CHAT_ID = int(os.environ["ADMIN_CHAT_ID"])
 LEADS_CHAT_ID = int(os.environ.get("LEADS_CHAT_ID", ADMIN_CHAT_ID))
 DATA_DIR = Path(os.environ.get("DATA_DIR", "./data"))
 # мини-приложение отдаёт наш сервер (web.py за Caddy); запасная копия — на GitHub Pages: https://mkronnen.github.io/direct-zapros/app/
-APP_URL = os.environ.get("APP_URL", "https://195-133-20-31.sslip.io/")   # app.directautoimport.ru не годится: с VPN (Happ/JSON-конфиги) .ru-домены идут в обход и не открываются
+# Адрес мини-приложения: сервер сам пишет его в data/public_url (https://<ip-через-дефисы>.sslip.io/, см. deploy/update.sh).
+# app.directautoimport.ru не годится: с VPN (Happ/JSON-конфиги) .ru-домены идут в обход и не открываются.
+APP_URL_ENV = os.environ.get("APP_URL", "")
+APP_URL_FALLBACK = "https://mkronnen.github.io/direct-zapros/app/"
+
+
+def app_url() -> str:
+    if APP_URL_ENV:
+        return APP_URL_ENV
+    try:
+        u = (DATA_DIR / "public_url").read_text().strip()
+        if u.startswith("https://"):
+            return u if u.endswith("/") else u + "/"
+    except Exception:
+        pass
+    return APP_URL_FALLBACK
 
 HERE = Path(__file__).parent
 TG = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -71,7 +86,8 @@ REVIEWS_URL = "https://t.me/+qnIV-9KL7lYwNDUy"
 def kb(chat_id: int | None = None) -> dict:
     """Клавиатура снизу. Если клиент пришёл по реферальной ссылке — промокод уходит в мини-приложение."""
     # v=версия репозитория: после каждого обновления приложения у клиентов открывается свежая версия, а не из кэша Telegram
-    url = APP_URL + ("&" if "?" in APP_URL else "?") + "v=" + app_version()
+    base = app_url()
+    url = base + ("&" if "?" in base else "?") + "v=" + app_version()
     promo = kv_get(f"promo:{chat_id}") if chat_id else None
     if promo:
         url += "&promo=" + promo
@@ -636,6 +652,15 @@ async def on_message(msg: dict):
         return
     if text.startswith("/stats") and chat_id == ADMIN_CHAT_ID:
         await send(chat_id, stats_text(24))
+        return
+    if text.startswith("/backup") and chat_id == ADMIN_CHAT_ID:   # копия базы бота — на случай переезда сервера
+        tmp = DATA_DIR / "backup.sqlite3"
+        dst = sqlite3.connect(tmp)
+        db.backup(dst)
+        dst.close()
+        await send_file("sendDocument", "document", chat_id, tmp, f"bot-{datetime.now(TZ):%Y-%m-%d}.sqlite3",
+                        "application/octet-stream", caption="Копия базы бота: клиенты, промокоды, заявки, настройки.")
+        tmp.unlink(missing_ok=True)
         return
     if text.startswith("/logs") and chat_id == ADMIN_CHAT_ID:
         proc = await asyncio.create_subprocess_exec(
